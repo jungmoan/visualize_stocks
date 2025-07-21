@@ -1,0 +1,27 @@
+{
+    "MA5": {
+        "color": "#ff0004",
+        "linewidth": 3.0,
+        "linestyle": "-"
+    },
+    "MA20": {
+        "color": "#1ec535",
+        "linewidth": 3.0,
+        "linestyle": "-"
+    },
+    "MA60": {
+        "color": "#9400D3",
+        "linewidth": 1.0,
+        "linestyle": "-"
+    },
+    "MA120": {
+        "color": "#32CD32",
+        "linewidth": 1.0,
+        "linestyle": "-"
+    },
+    "MA200": {
+        "color": "#0019ff",
+        "linewidth": 3.0,
+        "linestyle": "-"
+    }
+}

@@ -1,0 +1,7 @@
+streamlit
+pandas
+yfinance
+mplfinance
+pandas-ta
+requests
+beautifulsoup4
