@@ -6,6 +6,8 @@ import pandas_ta as ta
 import requests
 import json
 import os
+from datetime import datetime, time
+import pytz
 
 # Streamlit 페이지 설정
 st.set_page_config(layout="wide", page_title="주식 대시보드")
@@ -132,7 +134,8 @@ def get_fear_and_greed_index():
         
         score = int(data['fear_and_greed']['score'])
         rating = data['fear_and_greed']['rating'].capitalize()
-        return f"{rating} ({score})"
+        #return f"{rating} ({score})"
+        return f"{score}", rating # score only
     except Exception as e:
         # 만약 이 코드로도 실패한다면, 아래 에러 메시지를 통해 정확한 원인을 확인할 수 있습니다.
         st.error(f"Fear & Greed 지수 로딩 실패: {e}")
@@ -168,45 +171,74 @@ def get_company_name(ticker_symbol):
         # 에러 발생 시(잘못된 Ticker 등) Ticker를 그대로 반환합니다.
         return ticker_symbol
 
+@st.cache_data(ttl=60) # 1분마다 갱신
+def get_market_status(timezone_str, open_time, close_time):
+    """
+    지정된 시간대의 시장 개장 여부와 현지 시간을 반환합니다.
+    (주말 여부만 체크하며, 공휴일은 고려하지 않습니다.)
+    """
+    try:
+        tz = pytz.timezone(timezone_str)
+        now = datetime.now(tz)
+        
+        # 주말인지 확인 (월요일=0, 일요일=6)
+        is_weekday = now.weekday() < 5
+        
+        # 거래 시간 내에 있는지 확인
+        is_trading_hours = open_time <= now.time() < close_time
+
+        status = "🟢 Open" if is_weekday and is_trading_hours else "🔴 Closed"
+        return status, now.strftime('%H:%M')
+    except Exception:
+        return "Error", "N/A"
+
 # --- 메인 화면 ---
 
 # --- 주요 지표 표시 ---
 # 7개의 컬럼을 만들고, 첫 번째 컬럼을 여백으로 사용하여 지표들을 오른쪽에 작게 배치합니다.
-_, col1, col2, col3, col4, col5, col6 = st.columns([1.5, 1, 1, 1, 1, 1, 1])
+col_us, col_kr, col_sp, col_nasdaq, col_kospi, col_usd, col_fg, col_vix = st.columns([1, 1, 1, 1, 1, 1, 1, 1])
 
-with col1:
+with col_us:
+    us_status, us_time = get_market_status('America/New_York', time(9, 30), time(16, 0))
+    st.metric(label="🇺🇸 미국 (ET)", value=us_status, delta=us_time)
+
+with col_kr:
+    kr_status, kr_time = get_market_status('Asia/Seoul', time(9, 0), time(15, 30))
+    st.metric(label="🇰🇷 한국 (KST)", value=kr_status, delta=kr_time)
+
+with col_sp:
     sp500_price, sp500_delta = get_index_data('^GSPC')
     if sp500_price is not None:
         st.metric(label="S&P 500", value=f"{sp500_price:,.2f}", delta=f"{sp500_delta:,.2f}")
     else:
         st.metric(label="S&P 500", value="N/A")
 
-with col2:
+with col_nasdaq:
     nasdaq_price, nasdaq_delta = get_index_data('^IXIC')
     if nasdaq_price is not None:
         st.metric(label="나스닥", value=f"{nasdaq_price:,.2f}", delta=f"{nasdaq_delta:,.2f}")
     else:
         st.metric(label="나스닥", value="N/A")
 
-with col3:
+with col_kospi:
     kospi_price, kospi_delta = get_index_data('^KS200')
     if kospi_price is not None:
         st.metric(label="코스피200", value=f"{kospi_price:,.2f}", delta=f"{kospi_delta:,.2f}")
     else:
         st.metric(label="코스피200", value="N/A")
 
-with col4:
+with col_usd:
     usd_krw_price, usd_krw_delta = get_index_data('USDKRW=X')
     if usd_krw_price is not None:
         st.metric(label="USD/KRW", value=f"{usd_krw_price:,.2f}", delta=f"{usd_krw_delta:,.2f}")
     else:
         st.metric(label="USD/KRW", value="N/A")
 
-with col5:
-    fear_and_greed = get_fear_and_greed_index()
+with col_fg:
+    fear_and_greed, rating = get_fear_and_greed_index()
     st.metric(label="Fear & Greed", value=fear_and_greed)
 
-with col6:
+with col_vix:
     vix_price, vix_delta = get_index_data('^VIX')
     if vix_price is not None:
         st.metric(label="VIX", value=f"{vix_price:.2f}", delta=f"{vix_delta:.2f}")
