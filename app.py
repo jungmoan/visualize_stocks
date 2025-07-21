@@ -67,7 +67,7 @@ if 'ma_styles' not in st.session_state:
 st.sidebar.header('차트 설정')
 
 # Ticker 입력
-ticker_input = st.sidebar.text_input('Ticker', value='AAPL', help='예: AAPL, GOOG, MSFT').upper()
+ticker_input = st.sidebar.text_input('Ticker', value='GOOGL', help='예: AAPL, GOOG, MSFT').upper()
 # 사용자가 여러 티커를 입력하는 경우(공백, 콤마 등) 첫 번째 티커만 사용하도록 처리
 ticker = ticker_input.split(',')[0].strip().split(' ')[0]
 
@@ -116,6 +116,7 @@ show_bbands = st.sidebar.checkbox('볼린저 밴드 (Bollinger Bands)')
 show_rsi = st.sidebar.checkbox('상대강도지수 (RSI)')
 show_macd = st.sidebar.checkbox('MACD')
 show_stoch = st.sidebar.checkbox('스토캐스틱 (Stochastic)')
+show_squeeze = st.sidebar.checkbox('스퀴즈 모멘텀 (Squeeze Momentum)')
 
 # --- 보조 지표 데이터 로드 함수 ---
 @st.cache_data(ttl=900) # 15분 캐시
@@ -295,21 +296,59 @@ try:
             df.ta.macd(append=True)
         if show_stoch:
             df.ta.stoch(append=True)
+        if show_squeeze:
+            # TradingView LazyBear의 Squeeze Momentum Indicator 원본 로직을 직접 구현
+            # pandas-ta의 기본 squeeze와 계산 방식이 달라 직접 구현함
+            bb_length=20
+            kc_length=20
+            kc_mult=1.5
+            use_tr=True
+
+            # 1. 볼린저 밴드 (켈트너 채널 승수를 사용)
+            basis = ta.sma(df['Close'], length=bb_length)
+            dev = kc_mult * ta.stdev(df['Close'], length=bb_length)
+            df['BBU_LB'] = basis + dev
+            df['BBL_LB'] = basis - dev
+
+            # 2. 켈트너 채널 (True Range의 SMA를 사용)
+            ma = ta.sma(df['Close'], length=kc_length)
+            tr = ta.true_range(df['High'], df['Low'], df['Close']) if use_tr else (df['High'] - df['Low'])
+            rangema = ta.sma(tr, length=kc_length)
+            df['KCU_LB'] = ma + rangema * kc_mult
+            df['KCL_LB'] = ma - rangema * kc_mult
+
+            # 3. 스퀴즈 ON/OFF/NO 조건
+            df['SQZ_ON_CUSTOM'] = (df['BBL_LB'] > df['KCL_LB']) & (df['BBU_LB'] < df['KCU_LB'])
+            df['SQZ_OFF_CUSTOM'] = (df['BBL_LB'] < df['KCL_LB']) & (df['BBU_LB'] > df['KCU_LB'])
+            df['SQZ_NO_CUSTOM'] = ~df['SQZ_ON_CUSTOM'] & ~df['SQZ_OFF_CUSTOM']
+
+            # 4. 모멘텀 값 (Linear Regression)
+            highest_high = df['High'].rolling(kc_length).max()
+            lowest_low = df['Low'].rolling(kc_length).min()
+            sma_close = ta.sma(df['Close'], length=kc_length)
+            mom_source = df['Close'] - ((highest_high + lowest_low) / 2 + sma_close) / 2
+            df['SQZ_VAL_CUSTOM'] = ta.linreg(close=mom_source, length=kc_length)
 
         # --- 차트 데이터 준비 ---
         chart_data = df.tail(200)
 
         # --- 추가 플롯(add_plots) 생성 ---
         add_plots = []
+        fill_between_args = None
 
         # 보조지표 패널 인덱스는 2부터 시작 (패널 0: 가격, 패널 1: 거래량)
         panel_idx = 2
 
         # 볼린저 밴드는 메인 차트(패널 0)에 표시
         if show_bbands and all(c in chart_data.columns for c in ['BBU_20_2.0', 'BBL_20_2.0']):
+            # 밴드 사이를 회색으로 채웁니다.
+            fill_between_args = dict(y1=chart_data['BBU_20_2.0'].values,
+                                     y2=chart_data['BBL_20_2.0'].values,
+                                     color='grey', alpha=0.2)
+            # 밴드 라인을 얇은 점선으로 추가하여 시각적 명확성을 높입니다.
             add_plots.extend([
-                mpf.make_addplot(chart_data['BBU_20_2.0'], color='blue', alpha=0.5),
-                mpf.make_addplot(chart_data['BBL_20_2.0'], color='blue', alpha=0.5)
+                mpf.make_addplot(chart_data['BBU_20_2.0'], color='grey', linestyle='--', width=0.7),
+                mpf.make_addplot(chart_data['BBL_20_2.0'], color='grey', linestyle='--', width=0.7)
             ])
 
         # RSI
@@ -334,6 +373,39 @@ try:
             ])
             panel_idx += 1
 
+        # Squeeze Momentum
+        if show_squeeze and all(c in chart_data.columns for c in ['SQZ_VAL_CUSTOM', 'SQZ_ON_CUSTOM', 'SQZ_OFF_CUSTOM', 'SQZ_NO_CUSTOM']):
+            sqz_hist = chart_data['SQZ_VAL_CUSTOM']
+            is_positive = sqz_hist >= 0
+            momentum_increasing = sqz_hist.diff().fillna(0) >= 0
+
+            # 4가지 조건에 따라 히스토그램 바를 위한 4개의 개별 시리즈 생성
+            sqz_pos_inc = sqz_hist.where(is_positive & momentum_increasing)
+            sqz_pos_dec = sqz_hist.where(is_positive & ~momentum_increasing)
+            sqz_neg_inc = sqz_hist.where(~is_positive & momentum_increasing)
+            sqz_neg_dec = sqz_hist.where(~is_positive & ~momentum_increasing)
+
+            # Squeeze ON/OFF/NO 신호 (0선에 마커 표시)
+            # Squeeze ON (변동성 축소): 빨간색 십자가
+            # Squeeze OFF (변동성 확장): 초록색 십자가
+            # No Squeeze (밴드 동일): 파란색 십자가
+            sqz_on_marker = pd.Series(0, index=chart_data.index).where(chart_data['SQZ_ON_CUSTOM'])
+            sqz_off_marker = pd.Series(0, index=chart_data.index).where(chart_data['SQZ_OFF_CUSTOM'])
+            sqz_no_marker = pd.Series(0, index=chart_data.index).where(chart_data['SQZ_NO_CUSTOM'])
+
+            add_plots.extend([
+                # 히스토그램 바
+                mpf.make_addplot(sqz_pos_inc, type='bar', panel=panel_idx, color='lightgreen', title='Squeeze Momentum', secondary_y=False),
+                mpf.make_addplot(sqz_pos_dec, type='bar', panel=panel_idx, color='darkgreen', secondary_y=False),
+                mpf.make_addplot(sqz_neg_inc, type='bar', panel=panel_idx, color='lightcoral', secondary_y=False),
+                mpf.make_addplot(sqz_neg_dec, type='bar', panel=panel_idx, color='darkred', secondary_y=False),
+                # 스퀴즈 마커
+                mpf.make_addplot(sqz_on_marker, type='scatter', panel=panel_idx, color='black', marker='+', secondary_y=False),
+                mpf.make_addplot(sqz_off_marker, type='scatter', panel=panel_idx, color='green', marker='+', secondary_y=False),
+                mpf.make_addplot(sqz_no_marker, type='scatter', panel=panel_idx, color='blue', marker='+', secondary_y=False)
+            ])
+            panel_idx += 1
+
         # 차트 스타일 및 속성 설정
         mc = mpf.make_marketcolors(up='r', down='b', inherit=True)
         s = mpf.make_mpf_style(marketcolors=mc, gridstyle='--')
@@ -342,9 +414,8 @@ try:
         num_indicator_panels = panel_idx - 2
         panel_ratios = [3, 1] + [1.5] * num_indicator_panels
 
-        # 차트 생성
-        fig, axes = mpf.plot(
-            chart_data,
+        # 차트 생성 인자 설정
+        plot_kwargs = dict(
             type='candle',
             style=s,
             title=f'\n{ticker} Stock Price',
@@ -355,6 +426,11 @@ try:
             figsize=(20, 10),
             returnfig=True
         )
+        if fill_between_args:
+            plot_kwargs['fill_between'] = fill_between_args
+
+        # 차트 생성
+        fig, axes = mpf.plot(chart_data, **plot_kwargs)
         
         # --- 이동평균선과 범례(legend)를 수동으로 추가 ---
         ax_main = axes[0]
