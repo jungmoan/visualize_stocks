@@ -1,12 +1,18 @@
 import streamlit as st
 import pandas as pd
 import mplfinance as mpf
+from streamlit_autorefresh import st_autorefresh
 
 # 프로젝트 모듈 임포트
 from ui import sidebar, header
 from data import fetcher
 from core import calculator, charting
 from utils import settings
+
+
+# --- 자동 새로고침 설정 (60초마다) ---
+st_autorefresh(interval=60 * 1000, key="data_refresher")
+
 
 # --- 페이지 기본 설정 ---
 st.set_page_config(layout="wide", page_title="주식 대시보드")

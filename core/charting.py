@@ -120,10 +120,10 @@ def create_stock_chart(df, user_inputs, currency='USD'):
         date_to_loc = pd.Series(range(len(chart_data.index)), index=chart_data.index)
         buy_points = buy_signal_prices.dropna()
         if not buy_points.empty:
-            ax_main.scatter(date_to_loc[buy_points.index], buy_points.values, marker='^', color='lime', s=120, zorder=10, label='Buy Signal')
+            ax_main.scatter(date_to_loc[buy_points.index], buy_points.values, marker='^', color='lime', s=120, zorder=10, label='Buy Signal (SMI)')
         sell_points = sell_signal_prices.dropna()
         if not sell_points.empty:
-            ax_main.scatter(date_to_loc[sell_points.index], sell_points.values, marker='v', color='red', s=120, zorder=10, label='Sell Signal')
+            ax_main.scatter(date_to_loc[sell_points.index], sell_points.values, marker='v', color='red', s=120, zorder=10, label='Sell Signal (SMI)')
 
     # --- 최신가 라인 및 레이블 추가 ---
     latest_price = chart_data['Close'].iloc[-1]
