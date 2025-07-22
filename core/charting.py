@@ -1,6 +1,7 @@
 import streamlit as st
 import pandas as pd
 import mplfinance as mpf
+from matplotlib.ticker import FuncFormatter
 
 def _prepare_squeeze_plots(chart_data, panel_idx):
     """스퀴즈 모멘텀 지표를 위한 addplot 리스트를 생성합니다."""
@@ -10,16 +11,12 @@ def _prepare_squeeze_plots(chart_data, panel_idx):
     is_positive = sqz_hist >= 0
     momentum_increasing = sqz_hist.diff().fillna(0) >= 0
 
-    # 4가지 조건에 따라 히스토그램 바를 위한 4개의 개별 시리즈 생성
     sqz_pos_inc = sqz_hist.where(is_positive & momentum_increasing)
     sqz_pos_dec = sqz_hist.where(is_positive & ~momentum_increasing)
     sqz_neg_inc = sqz_hist.where(~is_positive & momentum_increasing)
     sqz_neg_dec = sqz_hist.where(~is_positive & ~momentum_increasing)
 
-    # Squeeze ON/OFF 신호 (0선에 마커 표시) - 색상 수정
-    # 검은색 십자가: 스퀴즈 ON (변동성 축소)
     sqz_on_marker = pd.Series(0, index=chart_data.index).where(chart_data['SQZ_ON_CUSTOM'])
-    # 초록색 십자가: 스퀴즈 OFF (변동성 확장)
     sqz_off_marker = pd.Series(0, index=chart_data.index).where(chart_data['SQZ_OFF_CUSTOM'])
     
     plots.extend([
@@ -33,15 +30,21 @@ def _prepare_squeeze_plots(chart_data, panel_idx):
     return plots
 
 
-def create_stock_chart(df, user_inputs):
+def create_stock_chart(df, user_inputs, currency='USD'):
     """계산된 데이터와 사용자 입력을 바탕으로 mplfinance 차트를 생성합니다."""
     
     chart_data = df.tail(200)
     add_plots = []
     fill_between_args = None
-    panel_idx = 2 # 패널 0: 가격, 패널 1: 거래량
+    panel_idx = 2
 
-    # 볼린저 밴드 (메인 차트)
+    # --- Y축 레이블 및 통화 기호 결정 ---
+    if currency == 'KRW':
+        ylabel = 'Price (KRW)'
+    else: # 기본값 USD 및 기타 통화
+        ylabel = f'Price ({currency})'
+
+    # --- 보조지표 패널 생성 ---
     if user_inputs['show_bbands'] and all(c in chart_data.columns for c in ['BBU_20_2.0', 'BBL_20_2.0']):
         fill_between_args = dict(y1=chart_data['BBU_20_2.0'].values, y2=chart_data['BBL_20_2.0'].values, color='grey', alpha=0.2)
         add_plots.extend([
@@ -49,12 +52,10 @@ def create_stock_chart(df, user_inputs):
             mpf.make_addplot(chart_data['BBL_20_2.0'], color='grey', linestyle='--', width=0.7)
         ])
 
-    # RSI
     if user_inputs['show_rsi'] and 'RSI_14' in chart_data.columns:
         add_plots.append(mpf.make_addplot(chart_data['RSI_14'], panel=panel_idx, color='green', title='RSI(14)'))
         panel_idx += 1
 
-    # MACD
     if user_inputs['show_macd'] and all(c in chart_data.columns for c in ['MACD_12_26_9', 'MACDs_12_26_9', 'MACDh_12_26_9']):
         add_plots.extend([
             mpf.make_addplot(chart_data['MACD_12_26_9'], panel=panel_idx, color='blue', title='MACD'),
@@ -63,7 +64,6 @@ def create_stock_chart(df, user_inputs):
         ])
         panel_idx += 1
 
-    # Stochastic
     if user_inputs['show_stoch'] and all(c in chart_data.columns for c in ['STOCHk_14_3_3', 'STOCHd_14_3_3']):
         add_plots.extend([
             mpf.make_addplot(chart_data['STOCHk_14_3_3'], panel=panel_idx, color='blue', title='Stochastic'),
@@ -71,51 +71,42 @@ def create_stock_chart(df, user_inputs):
         ])
         panel_idx += 1
 
-    # Squeeze Momentum
-    buy_signal_prices = pd.Series(dtype=float) # 빈 시리즈로 초기화
-    sell_signal_prices = pd.Series(dtype=float) # 빈 시리즈로 초기화
+    buy_signal_prices = pd.Series(dtype=float)
+    sell_signal_prices = pd.Series(dtype=float)
     if user_inputs['show_squeeze'] and all(c in chart_data.columns for c in ['SQZ_VAL_CUSTOM', 'SQZ_ON_CUSTOM', 'SQZ_OFF_CUSTOM']):
-        # 스퀴즈 모멘텀 하단 패널 생성
         add_plots.extend(_prepare_squeeze_plots(chart_data, panel_idx))
         
-        # --- 매수/매도 신호 로직 강화 ---
-        # 1. 스퀴즈가 "터지는" 시점 (이전 봉: ON, 현재 봉: OFF)
         squeeze_fired = (chart_data['SQZ_ON_CUSTOM'].shift(1) & chart_data['SQZ_OFF_CUSTOM'])
-
-        # 2. 모멘텀 방향성 확인 (증가 또는 감소)
         momentum_increasing = chart_data['SQZ_VAL_CUSTOM'].diff().fillna(0) >= 0
-
-        # 3. 매수 신호: 스퀴즈가 터지고, 모멘텀이 양수이며, 모멘텀이 증가 추세(또는 유지)일 때
         buy_signals = squeeze_fired & (chart_data['SQZ_VAL_CUSTOM'] > 0) & momentum_increasing
         buy_signal_prices = chart_data['Low'][buy_signals] * 0.98
-        
-        # 4. 매도 신호: 스퀴즈가 터지고, 모멘텀이 음수이며, 모멘텀이 감소 추세일 때
         sell_signals = squeeze_fired & (chart_data['SQZ_VAL_CUSTOM'] < 0) & ~momentum_increasing
         sell_signal_prices = chart_data['High'][sell_signals] * 1.02
-        # --- 신호 계산 끝 ---
-
         panel_idx += 1
 
-    # 차트 스타일 및 속성 설정
+    # --- 차트 생성 ---
     mc = mpf.make_marketcolors(up='r', down='b', inherit=True)
     s = mpf.make_mpf_style(marketcolors=mc, gridstyle='--')
     panel_ratios = [3, 1] + [1.5] * (panel_idx - 2)
 
     plot_kwargs = dict(
         type='candle', style=s, title=f'\n{user_inputs["ticker"]} Stock Price',
-        ylabel='Price ($)', volume=True, addplot=add_plots,
+        ylabel=ylabel, volume=True, addplot=add_plots,
         panel_ratios=panel_ratios, figsize=(20, 10), returnfig=True
     )
     if fill_between_args:
         plot_kwargs['fill_between'] = fill_between_args
 
-    # 차트 생성
     fig, axes = mpf.plot(chart_data, **plot_kwargs)
     
-    # --- 이동평균선 및 매매 신호 수동 추가 ---
+    # --- 차트 후처리: 이동평균선, 신호, 최신가 라인 추가 ---
     ax_main = axes[0]
     
-    # 이동평균선 추가
+    # --- Y축 틱 레이블 포맷팅 (3자리수 콤마) ---
+    def comma_formatter(x, pos):
+        return f'{int(x):,}'
+    ax_main.yaxis.set_major_formatter(FuncFormatter(comma_formatter))
+
     for ma_period in user_inputs['selected_ma_periods']:
         ma_name = f'MA{ma_period}'
         style = st.session_state.ma_styles[ma_name]
@@ -125,21 +116,27 @@ def create_stock_chart(df, user_inputs):
                          color=style['color'], label=ma_name, 
                          linewidth=style['linewidth'], linestyle=style['linestyle'])
     
-    # 스퀴즈 모멘텀 매매 신호 추가
     if user_inputs['show_squeeze']:
         date_to_loc = pd.Series(range(len(chart_data.index)), index=chart_data.index)
-
         buy_points = buy_signal_prices.dropna()
         if not buy_points.empty:
-            buy_x_coords = date_to_loc[buy_points.index]
-            ax_main.scatter(buy_x_coords, buy_points.values, marker='^', color='lime', s=120, zorder=10, label='Buy Signal')
-
+            ax_main.scatter(date_to_loc[buy_points.index], buy_points.values, marker='^', color='lime', s=120, zorder=10, label='Buy Signal')
         sell_points = sell_signal_prices.dropna()
         if not sell_points.empty:
-            sell_x_coords = date_to_loc[sell_points.index]
-            ax_main.scatter(sell_x_coords, sell_points.values, marker='v', color='red', s=120, zorder=10, label='Sell Signal')
+            ax_main.scatter(date_to_loc[sell_points.index], sell_points.values, marker='v', color='red', s=120, zorder=10, label='Sell Signal')
 
-    # 범례 표시
+    # --- 최신가 라인 및 레이블 추가 ---
+    latest_price = chart_data['Close'].iloc[-1]
+    latest_price_formatted = f'{latest_price:,.2f}' # 3자리수 콤마 포맷팅
+
+    ax_main.axhline(y=latest_price, color='dodgerblue', linestyle='--', linewidth=1, alpha=0.7)
+    ax_main.text(1.01, latest_price, latest_price_formatted,
+                 transform=ax_main.get_yaxis_transform(),
+                 verticalalignment='center',
+                 color='white',
+                 bbox=dict(facecolor='dodgerblue', alpha=0.9, pad=2, boxstyle='round,pad=0.2'),
+                 zorder=20)
+
     if user_inputs['selected_ma_periods'] or (user_inputs['show_squeeze'] and (not buy_signal_prices.dropna().empty or not sell_signal_prices.dropna().empty)):
         ax_main.legend(loc='upper left')
 

@@ -5,7 +5,7 @@ from datetime import time
 def display():
     """메인 화면 상단의 주요 지수 및 시장 현황 메트릭을 표시합니다."""
     
-    # 7개의 컬럼을 생성합니다.
+    # 8개의 컬럼을 생성합니다.
     cols = st.columns(8)
 
     with cols[0]:
@@ -31,11 +31,12 @@ def display():
             st.metric(label="나스닥", value="N/A")
 
     with cols[4]:
-        kospi_price, kospi_delta = fetcher.get_index_data('^KS200')
+        # 코스피 200(^KS200)에서 코스피 종합(^KS11)으로 변경
+        kospi_price, kospi_delta = fetcher.get_index_data('^KS11')
         if kospi_price is not None:
-            st.metric(label="코스피200", value=f"{kospi_price:,.2f}", delta=f"{kospi_delta:,.2f}")
+            st.metric(label="코스피", value=f"{kospi_price:,.2f}", delta=f"{kospi_delta:,.2f}")
         else:
-            st.metric(label="코스피200", value="N/A")
+            st.metric(label="코스피", value="N/A")
 
     with cols[5]:
         usd_krw_price, usd_krw_delta = fetcher.get_index_data('USDKRW=X')

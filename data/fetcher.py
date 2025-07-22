@@ -44,14 +44,19 @@ def get_index_data(ticker_symbol):
         return None, None
 
 @st.cache_data(ttl=3600) # 1시간 캐싱
-def get_company_name(ticker_symbol):
-    """yf.Ticker.info에서 회사 이름을 가져옵니다."""
+def get_stock_info(ticker_symbol):
+    """yf.Ticker.info에서 주식 정보를 딕셔너리로 가져옵니다."""
     try:
-        info = yf.Ticker(ticker_symbol).info
-        name = info.get('longName', info.get('shortName'))
-        return name if name else ticker_symbol
+        return yf.Ticker(ticker_symbol).info
     except Exception:
-        return ticker_symbol
+        return {} # 에러 발생 시 빈 딕셔너리 반환
+
+@st.cache_data(ttl=3600) # 1시간 캐싱
+def get_company_name(ticker_symbol):
+    """get_stock_info를 사용해 회사 이름을 가져옵니다."""
+    info = get_stock_info(ticker_symbol)
+    name = info.get('longName', info.get('shortName'))
+    return name if name else ticker_symbol
 
 @st.cache_data(ttl=60) # 1분마다 갱신
 def get_market_status(timezone_str, open_time, close_time):

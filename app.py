@@ -7,9 +7,6 @@ from ui import sidebar, header
 from data import fetcher
 from core import calculator, charting
 from utils import settings
-from streamlit_autorefresh import st_autorefresh
-
-st_autorefresh(interval=60 * 1000, key="data_refresher")
 
 # --- 페이지 기본 설정 ---
 st.set_page_config(layout="wide", page_title="주식 대시보드")
@@ -32,15 +29,17 @@ def main():
     """메인 애플리케이션 함수"""
     
     # 1. 사이드바 UI 표시 및 사용자 입력 받기
-    # 사이드바 함수는 사용자의 모든 선택사항 (ticker, ma, indicators)을 담은 딕셔너리를 반환합니다.
     user_inputs = sidebar.display()
     ticker = user_inputs['ticker']
 
     # 2. 헤더 UI (주요 지수) 표시
     header.display()
 
-    # 3. 메인 타이틀 표시
-    company_name = fetcher.get_company_name(ticker)
+    # 3. 메인 타이틀 및 주식 정보 가져오기
+    stock_info = fetcher.get_stock_info(ticker)
+    company_name = stock_info.get('longName', stock_info.get('shortName', ticker))
+    currency = stock_info.get('currency', 'USD') # 정보가 없을 경우 기본값 USD
+
     if company_name and company_name.lower() != ticker.lower():
         st.title(f'{company_name} ({ticker}) 주가 차트 대시보드')
     else:
@@ -65,15 +64,14 @@ def main():
         # 보조지표 계산
         df_with_indicators = calculator.calculate_all_indicators(data, user_inputs)
 
-        # 차트 생성
-        fig, axes = charting.create_stock_chart(df_with_indicators, user_inputs)
+        # 차트 생성 (currency 정보 전달)
+        fig, axes = charting.create_stock_chart(df_with_indicators, user_inputs, currency)
         
         # Streamlit에 차트 표시
         st.pyplot(fig)
 
         # 데이터 테이블 표시
         st.subheader('최근 10일 데이터')
-        # 사용자가 선택한 보조지표와 관련된 컬럼만 표시하여 가독성 향상
         display_cols = ['Open', 'High', 'Low', 'Close', 'Volume']
         for ma in user_inputs['selected_ma_periods']:
             display_cols.append(f'MA_{ma}')
