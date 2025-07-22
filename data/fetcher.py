@@ -4,11 +4,37 @@ import requests
 import pandas as pd
 from datetime import datetime, time
 import pytz
+import os
 
-@st.cache_data(ttl=3600)
+# --- 로컬 캐시 설정 ---
+CACHE_DIR = "cache" # 데이터를 저장할 폴더 이름
+CACHE_TTL_SECONDS = 15 * 60 # 캐시 유효 시간 (15분)
+
 def load_daily_data(ticker_symbol):
-    """지정된 티커의 일봉 데이터를 다운로드합니다."""
-    return yf.download(ticker_symbol, period='500d', interval='1d')
+    """
+    지정된 티커의 일봉 데이터를 다운로드합니다.
+    로컬 캐시를 확인하고, 데이터가 15분 이내의 최신 데이터이면 캐시를 사용합니다.
+    """
+    os.makedirs(CACHE_DIR, exist_ok=True)
+    file_path = os.path.join(CACHE_DIR, f"{ticker_symbol}.csv")
+
+    if os.path.exists(file_path):
+        mod_time = os.path.getmtime(file_path)
+        if (datetime.now().timestamp() - mod_time) < CACHE_TTL_SECONDS:
+            try:
+                return pd.read_csv(file_path, index_col='Date', parse_dates=True)
+            except Exception as e:
+                print(f"Error loading from cache, refetching: {e}")
+
+    try:
+        data = yf.download(ticker_symbol, period='500d', interval='1d')
+        if not data.empty:
+            data.to_csv(file_path)
+        return data
+    except Exception as e:
+        print(f"Failed to fetch data for {ticker_symbol}: {e}")
+        return pd.DataFrame()
+
 
 @st.cache_data(ttl=60) # 1분 캐시
 def get_current_prices(ticker_list):
@@ -30,13 +56,63 @@ def get_current_prices(ticker_list):
     except Exception:
         return pd.Series(dtype=float)
 
+@st.cache_data(ttl=60) # 1분 캐시
+def get_watchlist_data(ticker_list):
+    """
+    (핵심 재작성) 관심종목 데이터를 가져옵니다. 
+    1개 티커와 여러 개 티커의 경우를 명확히 구분하고, Volume을 제외한 필수 데이터만 반환합니다.
+    """
+    if not ticker_list:
+        return pd.DataFrame()
+    
+    try:
+        data = yf.download(tickers=ticker_list, period='2d', progress=False)
+        
+        if data.empty or len(data) < 2:
+            return pd.DataFrame()
+
+        # Case 1: Single Ticker
+        if len(ticker_list) == 1:
+            ticker = ticker_list[0]
+            latest = data.iloc[-1]
+            previous = data.iloc[-2]
+            
+            change = latest['Close'] - previous['Close']
+            percent_change = (change / previous['Close']) * 100 if previous['Close'] != 0 else 0
+            
+            return pd.DataFrame([{
+                'Ticker': ticker,
+                'Current Price': latest['Close'],
+                'Change': change,
+                '% Change': percent_change,
+            }])
+
+        # Case 2: Multiple Tickers
+        else:
+            latest = data.iloc[-1]
+            previous = data.iloc[-2]
+            
+            change = latest['Close'] - previous['Close']
+            percent_change = (change / previous['Close']) * 100
+            
+            result = pd.DataFrame({
+                'Current Price': latest['Close'],
+                'Change': change,
+                '% Change': percent_change,
+            })
+            result = result.reset_index().rename(columns={'Ticker': 'Ticker'})
+            return result.dropna(subset=['Current Price'])
+
+    except Exception as e:
+        print(f"Error in get_watchlist_data: {e}")
+        return pd.DataFrame()
+
 
 @st.cache_data(ttl=300) # 5분 캐시
 def get_fear_and_greed_index():
     """CNN Fear and Greed 지수를 API를 통해 가져옵니다."""
     try:
         url = "https://production.dataviz.cnn.io/index/fearandgreed/graphdata"
-        # --- (핵심 수정) 차단을 우회하기 위해 더 많은 브라우저 헤더 정보 추가 ---
         headers = {
             'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
             'Accept': 'application/json, text/plain, */*',
@@ -45,17 +121,15 @@ def get_fear_and_greed_index():
             'Referer': 'https://www.cnn.com/markets/fear-and-greed',
         }
         response = requests.get(url, headers=headers, timeout=10)
-        response.raise_for_status() # 오류가 있으면 여기서 예외 발생
+        response.raise_for_status()
         data = response.json()
         score = int(data['fear_and_greed']['score'])
         rating = data['fear_and_greed']['rating'].capitalize()
         return f"{score}", rating
     except Exception as e:
-        # 오류 발생 시 콘솔에 에러 메시지 출력
         print("--- Fear & Greed Index Error ---")
         print(e)
         print("---------------------------------")
-        # UI에는 간략한 메시지 표시
         st.error("F&G 지수 로딩 실패. 콘솔을 확인하세요.")
         return "N/A", "Error"
 

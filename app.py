@@ -71,8 +71,7 @@ def main():
         df_with_indicators = calculator.calculate_all_indicators(data, user_inputs)
 
         # 차트 생성 (currency 정보 전달)
-        fig, axes = charting.create_stock_chart(df_with_indicators, user_inputs, currency)
-        
+        fig, axes = charting.create_stock_chart(df_with_indicators, user_inputs, company_name, currency)        
         # Streamlit에 차트 표시
         st.pyplot(fig)
 

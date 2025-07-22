@@ -30,7 +30,7 @@ def _prepare_squeeze_plots(chart_data, panel_idx):
     return plots
 
 
-def create_stock_chart(df, user_inputs, currency='USD'):
+def create_stock_chart(df, user_inputs, company_name, currency='USD'):
     """계산된 데이터와 사용자 입력을 바탕으로 mplfinance 차트를 생성합니다."""
     
     chart_data = df.tail(200)
@@ -76,15 +76,11 @@ def create_stock_chart(df, user_inputs, currency='USD'):
     if user_inputs['show_squeeze'] and all(c in chart_data.columns for c in ['SQZ_VAL_CUSTOM', 'SQZ_ON_CUSTOM', 'SQZ_OFF_CUSTOM']):
         add_plots.extend(_prepare_squeeze_plots(chart_data, panel_idx))
         
-        # --- (핵심 수정) 매수/매도 신호 로직을 분리하여 적용 ---
-        
-        # 매수 신호: 스퀴즈가 터지고, 모멘텀이 양수이며, 모멘텀이 증가 추세일 때 (기존 로직)
         squeeze_fired = (chart_data['SQZ_ON_CUSTOM'].shift(1) & chart_data['SQZ_OFF_CUSTOM'])
         momentum_increasing = chart_data['SQZ_VAL_CUSTOM'].diff().fillna(0) >= 0
         buy_signals = squeeze_fired & (chart_data['SQZ_VAL_CUSTOM'] > 0) & momentum_increasing
         buy_signal_prices = chart_data['Low'][buy_signals] * 0.98 
         
-        # 매도 신호: 모멘텀이 양수(+)에서 음수(-)로 전환될 때 (새로운 로직)
         prev_momentum = chart_data['SQZ_VAL_CUSTOM'].shift(1)
         current_momentum = chart_data['SQZ_VAL_CUSTOM']
         sell_signals = (prev_momentum >= 0) & (current_momentum < 0)
@@ -98,8 +94,8 @@ def create_stock_chart(df, user_inputs, currency='USD'):
     panel_ratios = [3, 1] + [1.5] * (panel_idx - 2)
 
     plot_kwargs = dict(
-        type='candle', style=s, title=f'\n{user_inputs["ticker"]} Stock Price',
-        ylabel=ylabel, volume=True, addplot=add_plots,
+        type='candle', style=s,
+        volume=True, addplot=add_plots,
         panel_ratios=panel_ratios, figsize=(20, 10), returnfig=True
     )
     if fill_between_args:
@@ -107,14 +103,30 @@ def create_stock_chart(df, user_inputs, currency='USD'):
 
     fig, axes = mpf.plot(chart_data, **plot_kwargs)
     
-    # --- 차트 후처리: 이동평균선, 신호, 최신가 라인 추가 ---
+    # --- (핵심 수정) 차트 후처리: 폰트 크기 및 제목, 레이블 설정 ---
     ax_main = axes[0]
-    
-    # --- Y축 틱 레이블 포맷팅 (3자리수 콤마) ---
+    ax_volume = axes[2] # 거래량 패널
+
+    # 1. 메인 타이틀 설정
+    fig.suptitle(f'{company_name} ({user_inputs["ticker"]}) Price', fontsize=24, y=0.95)
+
+    # 2. Y축 레이블 폰트 크기 설정
+    ax_main.set_ylabel(ylabel, fontsize=14)
+    ax_volume.set_ylabel('Volume', fontsize=14)
+
+    # 3. Y축 틱(눈금) 레이블 폰트 크기 및 포맷 설정
     def comma_formatter(x, pos):
         return f'{int(x):,}'
     ax_main.yaxis.set_major_formatter(FuncFormatter(comma_formatter))
+    ax_main.tick_params(axis='y', labelsize=12)
 
+    # 4. X축 틱(날짜) 레이블 폰트 크기 설정
+    ax_main.tick_params(axis='x', labelsize=12)
+    # 모든 하단 패널의 x축 레이블 크기도 동일하게 설정
+    for i in range(2, len(axes), 2):
+        axes[i].tick_params(axis='x', labelsize=12)
+
+    # --- 이동평균선, 신호, 최신가 라인 추가 ---
     for ma_period in user_inputs['selected_ma_periods']:
         ma_name = f'MA{ma_period}'
         style = st.session_state.ma_styles[ma_name]
@@ -133,9 +145,8 @@ def create_stock_chart(df, user_inputs, currency='USD'):
         if not sell_points.empty:
             ax_main.scatter(date_to_loc[sell_points.index], sell_points.values, marker='v', color='red', s=120, zorder=10, label='SMI Sell (Zero-Cross)')
 
-    # --- 최신가 라인 및 레이블 추가 ---
     latest_price = chart_data['Close'].iloc[-1]
-    latest_price_formatted = f'{latest_price:,.2f}' # 3자리수 콤마 포맷팅
+    latest_price_formatted = f'{latest_price:,.2f}'
 
     ax_main.axhline(y=latest_price, color='dodgerblue', linestyle='--', linewidth=1, alpha=0.7)
     ax_main.text(1.01, latest_price, latest_price_formatted,
