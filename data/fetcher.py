@@ -31,22 +31,35 @@ def get_current_prices(ticker_list):
         return pd.Series(dtype=float)
 
 
-@st.cache_data(ttl=300) # 5분 캐시 (기존 15분에서 단축)
+@st.cache_data(ttl=300) # 5분 캐시
 def get_fear_and_greed_index():
     """CNN Fear and Greed 지수를 API를 통해 가져옵니다."""
     try:
         url = "https://production.dataviz.cnn.io/index/fearandgreed/graphdata"
-        headers = {'User-Agent': 'Mozilla/5.0'}
+        # --- (핵심 수정) 차단을 우회하기 위해 더 많은 브라우저 헤더 정보 추가 ---
+        headers = {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
+            'Accept': 'application/json, text/plain, */*',
+            'Accept-Language': 'en-US,en;q=0.9,ko;q=0.8',
+            'Origin': 'https://www.cnn.com',
+            'Referer': 'https://www.cnn.com/markets/fear-and-greed',
+        }
         response = requests.get(url, headers=headers, timeout=10)
-        response.raise_for_status()
+        response.raise_for_status() # 오류가 있으면 여기서 예외 발생
         data = response.json()
         score = int(data['fear_and_greed']['score'])
         rating = data['fear_and_greed']['rating'].capitalize()
         return f"{score}", rating
-    except Exception:
+    except Exception as e:
+        # 오류 발생 시 콘솔에 에러 메시지 출력
+        print("--- Fear & Greed Index Error ---")
+        print(e)
+        print("---------------------------------")
+        # UI에는 간략한 메시지 표시
+        st.error("F&G 지수 로딩 실패. 콘솔을 확인하세요.")
         return "N/A", "Error"
 
-@st.cache_data(ttl=60) # 1분 캐시 (기존 15분에서 단축)
+@st.cache_data(ttl=60) # 1분 캐시
 def get_index_data(ticker_symbol):
     """지정된 티커의 최신 값과 변화량을 가져옵니다."""
     try:

@@ -76,12 +76,20 @@ def create_stock_chart(df, user_inputs, currency='USD'):
     if user_inputs['show_squeeze'] and all(c in chart_data.columns for c in ['SQZ_VAL_CUSTOM', 'SQZ_ON_CUSTOM', 'SQZ_OFF_CUSTOM']):
         add_plots.extend(_prepare_squeeze_plots(chart_data, panel_idx))
         
+        # --- (핵심 수정) 매수/매도 신호 로직을 분리하여 적용 ---
+        
+        # 매수 신호: 스퀴즈가 터지고, 모멘텀이 양수이며, 모멘텀이 증가 추세일 때 (기존 로직)
         squeeze_fired = (chart_data['SQZ_ON_CUSTOM'].shift(1) & chart_data['SQZ_OFF_CUSTOM'])
         momentum_increasing = chart_data['SQZ_VAL_CUSTOM'].diff().fillna(0) >= 0
         buy_signals = squeeze_fired & (chart_data['SQZ_VAL_CUSTOM'] > 0) & momentum_increasing
-        buy_signal_prices = chart_data['Low'][buy_signals] * 0.98
-        sell_signals = squeeze_fired & (chart_data['SQZ_VAL_CUSTOM'] < 0) & ~momentum_increasing
+        buy_signal_prices = chart_data['Low'][buy_signals] * 0.98 
+        
+        # 매도 신호: 모멘텀이 양수(+)에서 음수(-)로 전환될 때 (새로운 로직)
+        prev_momentum = chart_data['SQZ_VAL_CUSTOM'].shift(1)
+        current_momentum = chart_data['SQZ_VAL_CUSTOM']
+        sell_signals = (prev_momentum >= 0) & (current_momentum < 0)
         sell_signal_prices = chart_data['High'][sell_signals] * 1.02
+        
         panel_idx += 1
 
     # --- 차트 생성 ---
@@ -120,10 +128,10 @@ def create_stock_chart(df, user_inputs, currency='USD'):
         date_to_loc = pd.Series(range(len(chart_data.index)), index=chart_data.index)
         buy_points = buy_signal_prices.dropna()
         if not buy_points.empty:
-            ax_main.scatter(date_to_loc[buy_points.index], buy_points.values, marker='^', color='lime', s=120, zorder=10, label='Buy Signal (SMI)')
+            ax_main.scatter(date_to_loc[buy_points.index], buy_points.values, marker='^', color='lime', s=120, zorder=10, label='SMI Buy (Squeeze Fire)')
         sell_points = sell_signal_prices.dropna()
         if not sell_points.empty:
-            ax_main.scatter(date_to_loc[sell_points.index], sell_points.values, marker='v', color='red', s=120, zorder=10, label='Sell Signal (SMI)')
+            ax_main.scatter(date_to_loc[sell_points.index], sell_points.values, marker='v', color='red', s=120, zorder=10, label='SMI Sell (Zero-Cross)')
 
     # --- 최신가 라인 및 레이블 추가 ---
     latest_price = chart_data['Close'].iloc[-1]
