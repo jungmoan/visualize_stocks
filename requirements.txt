@@ -7,3 +7,4 @@ pandas-ta
 requests
 beautifulsoup4
 streamlit-autorefresh
+setuptools
