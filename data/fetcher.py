@@ -12,24 +12,43 @@ CACHE_TTL_SECONDS = 15 * 60 # 캐시 유효 시간 (15분)
 
 def load_daily_data(ticker_symbol):
     """
-    지정된 티커의 일봉 데이터를 다운로드합니다.
-    로컬 캐시를 확인하고, 데이터가 15분 이내의 최신 데이터이면 캐시를 사용합니다.
+    (핵심 수정) 지정된 티커의 일봉 데이터를 다운로드합니다.
+    데이터 저장 전, 복잡한 헤더를 정리하여 캐시 파일의 안정성을 높였습니다.
     """
     os.makedirs(CACHE_DIR, exist_ok=True)
     file_path = os.path.join(CACHE_DIR, f"{ticker_symbol}.csv")
 
+    # 1. 캐시 파일 확인
     if os.path.exists(file_path):
         mod_time = os.path.getmtime(file_path)
         if (datetime.now().timestamp() - mod_time) < CACHE_TTL_SECONDS:
+            print(f"Loading '{ticker_symbol}' from local cache.")
             try:
-                return pd.read_csv(file_path, index_col='Date', parse_dates=True)
-            except Exception as e:
-                print(f"Error loading from cache, refetching: {e}")
+                df = pd.read_csv(file_path, index_col='Date', parse_dates=True)
+                if isinstance(df.index, pd.DatetimeIndex):
+                    return df
+            except Exception:
+                # 파일이 손상되었을 수 있으므로, 삭제하고 새로 받도록 처리
+                print(f"Corrupted cache file detected for '{ticker_symbol}'. Deleting and refetching.")
+                os.remove(file_path)
 
+    # 2. 캐시가 없거나, 오래되었거나, 로딩에 실패했으면 yfinance에서 데이터 가져오기
+    print(f"Fetching '{ticker_symbol}' from yfinance.")
     try:
         data = yf.download(ticker_symbol, period='500d', interval='1d')
+        
+        # --- (핵심 수정) yfinance가 복잡한 헤더를 반환하는 경우에 대한 처리 ---
+        if isinstance(data.columns, pd.MultiIndex):
+            # 복잡한 헤더를 단순한 형태로 변환 (예: ('Close', 'GOOGL') -> 'Close')
+            data.columns = data.columns.get_level_values(0)
+            # 중복된 컬럼이 생길 경우를 대비해 제거
+            data = data.loc[:,~data.columns.duplicated()]
+        # --- 수정 끝 ---
+
         if not data.empty:
-            data.to_csv(file_path)
+            # 3. 향후 오류를 방지하기 위해 항상 'Date'라는 이름으로 인덱스를 저장
+            data.to_csv(file_path, index_label='Date')
+            print(f"Saved '{ticker_symbol}' to local cache.")
         return data
     except Exception as e:
         print(f"Failed to fetch data for {ticker_symbol}: {e}")
@@ -60,7 +79,7 @@ def get_current_prices(ticker_list):
 def get_watchlist_data(ticker_list):
     """
     (핵심 재작성) 관심종목 데이터를 가져옵니다. 
-    1개 티커와 여러 개 티커의 경우를 명확히 구분하고, Volume을 제외한 필수 데이터만 반환합니다.
+    1개 티커와 여러 개 티커의 경우를 명확히 구분하여 항상 안정적인 데이터프레임을 반환합니다.
     """
     if not ticker_list:
         return pd.DataFrame()
@@ -74,6 +93,9 @@ def get_watchlist_data(ticker_list):
         # Case 1: Single Ticker
         if len(ticker_list) == 1:
             ticker = ticker_list[0]
+            if 'Close' not in data.columns or data['Close'].isnull().all():
+                return pd.DataFrame() # 데이터가 없는 경우
+
             latest = data.iloc[-1]
             previous = data.iloc[-2]
             
@@ -85,6 +107,7 @@ def get_watchlist_data(ticker_list):
                 'Current Price': latest['Close'],
                 'Change': change,
                 '% Change': percent_change,
+                'Volume': latest['Volume']
             }])
 
         # Case 2: Multiple Tickers
@@ -92,16 +115,21 @@ def get_watchlist_data(ticker_list):
             latest = data.iloc[-1]
             previous = data.iloc[-2]
             
-            change = latest['Close'] - previous['Close']
-            percent_change = (change / previous['Close']) * 100
+            # 유효한 데이터가 있는 티커만 선택
+            valid_tickers = latest['Close'].dropna().index
             
-            result = pd.DataFrame({
-                'Current Price': latest['Close'],
-                'Change': change,
-                '% Change': percent_change,
+            # 유효한 티커에 대해서만 계산 수행
+            change = latest['Close'][valid_tickers] - previous['Close'][valid_tickers]
+            percent_change = (change / previous['Close'][valid_tickers]) * 100
+            
+            result_df = pd.DataFrame({
+                'Ticker': valid_tickers,
+                'Current Price': latest['Close'][valid_tickers].values,
+                'Change': change.values,
+                '% Change': percent_change.values,
+                'Volume': latest['Volume'][valid_tickers].values
             })
-            result = result.reset_index().rename(columns={'Ticker': 'Ticker'})
-            return result.dropna(subset=['Current Price'])
+            return result_df.dropna(subset=['Current Price'])
 
     except Exception as e:
         print(f"Error in get_watchlist_data: {e}")
