@@ -135,7 +135,7 @@ def create_stock_chart(df, user_inputs, company_name, currency='USD'):
         if not sell_points.empty:
             ax_main.scatter(date_to_loc[sell_points.index], sell_points.values, marker='v', color='red', s=120, zorder=10, label='SMI Sell (Zero-Cross)')
 
-    # --- (핵심 수정) Latest close & percent change (regular session) only ---
+    # --- (핵심 수정) Latest close & percent change (regular session) only (우측 상단 고정) ---
     if len(chart_data) >= 2:
         latest_candle = chart_data.iloc[-1]
         previous_close = chart_data['Close'].iloc[-2]
@@ -143,14 +143,14 @@ def create_stock_chart(df, user_inputs, company_name, currency='USD'):
         daily_percent_change = (daily_change / previous_close) * 100 if previous_close != 0 else 0
         price_label_color = 'darkgreen' if daily_change >= 0 else 'darkred'
         price_label_text = f'Close: {latest_candle["Close"]:,.2f} ({daily_percent_change:+.2f}%)'
-        y_range = ax_main.get_ylim()[1] - ax_main.get_ylim()[0]
-        y_position = latest_candle['High'] + y_range * 0.05
-        ax_main.text(len(chart_data) - 1, y_position, f' {price_label_text} ',
-                     color='white',
-                     verticalalignment='bottom',
-                     horizontalalignment='center',
-                     fontsize=14, 
-                     bbox=dict(facecolor=price_label_color, alpha=0.9, pad=4, boxstyle='round,pad=0.4'))
+        # 우측 상단 고정 위치 (axes 좌표계 사용)
+        ax_main.text(0.99, 0.98, price_label_text,
+            color='white',
+            fontsize=14,
+            verticalalignment='top',
+            horizontalalignment='right',
+            transform=ax_main.transAxes,
+            bbox=dict(facecolor=price_label_color, alpha=0.9, pad=4, boxstyle='round,pad=0.4'))
 
     if user_inputs['selected_ma_periods'] or (user_inputs['show_squeeze'] and (not buy_signal_prices.empty or not sell_signal_prices.empty)):
         ax_main.legend(loc='upper left')
