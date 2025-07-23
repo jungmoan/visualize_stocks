@@ -60,7 +60,6 @@ with col1:
         "통합 표시 통화", ["원화 (KRW)", "달러 (USD)"], horizontal=True, label_visibility="collapsed"
     )
 with col2:
-    # (핵심 추가) 연금계좌 필터 라디오 버튼
     pension_filter = st.radio(
         "계좌 필터", ["전체 합산", "일반계좌만"], horizontal=True, label_visibility="collapsed"
     )
@@ -80,7 +79,6 @@ with st.expander("✏️ 주식 포트폴리오 편집하기"):
             "수량": st.column_config.NumberColumn("수량", format="%.4f", required=True),
             "평균매입금액": st.column_config.NumberColumn("평균매입금액", format="%.2f", required=True),
             "카테고리": st.column_config.SelectboxColumn("자산 종류", options=["성장주", "배당주", "채권"], required=True),
-            # (핵심 추가) 연금계좌 여부 체크박스 컬럼
             "연금계좌": st.column_config.CheckboxColumn("연금계좌", default=False)
         }
     )
@@ -130,7 +128,12 @@ if usd_krw_rate:
     ).reset_index()
     
     tickers = agg_stocks["ticker"].tolist()
-    current_prices = fetcher.get_current_prices(tickers)
+    kr_tickers = [t for t in tickers if '.KS' in t.upper()]
+    other_tickers = [t for t in tickers if '.KS' not in t.upper()]
+    kr_prices = fetcher.get_current_prices(kr_tickers)
+    other_prices = fetcher.get_current_prices(other_tickers)
+    current_prices = pd.concat([kr_prices, other_prices])
+    
     agg_stocks['현재가'] = agg_stocks['ticker'].map(current_prices).fillna(0)
     agg_stocks['평가금액_원본'] = agg_stocks['수량'] * agg_stocks['현재가']
     agg_stocks['currency'] = agg_stocks['ticker'].apply(lambda x: 'KRW' if '.KS' in x.upper() else 'USD')
@@ -143,40 +146,44 @@ if usd_krw_rate:
     commodities_df['currency'] = 'KRW'
     commodities_df['총매입금액'] = pd.to_numeric(commodities_df['수량']) * pd.to_numeric(commodities_df['평균매입금액'])
     commodities_df['평가금액_원본'] = pd.to_numeric(commodities_df['수량']) * pd.to_numeric(commodities_df['현재가'])
-    
+    commodities_df['연금계좌'] = False # (FutureWarning 해결)
+
     # 3. 현금 데이터 처리
     cash_df = edited_cash_df.copy()
     cash_df.dropna(subset=["통화", "금액"], inplace=True)
-    cash_df['ticker'] = cash_df['통화'].apply(lambda x: f"{x} 현금")
-    cash_df['카테고리'] = '현금'
-    cash_df.rename(columns={'통화': 'currency', '금액': '총매입금액'}, inplace=True)
-    cash_df['평가금액_원본'] = cash_df['총매입금액']
+    agg_cash = cash_df.groupby('통화').agg(금액=('금액', 'sum')).reset_index()
+    agg_cash['ticker'] = agg_cash['통화'].apply(lambda x: f"{x} 현금")
+    agg_cash['카테고리'] = '현금'
+    agg_cash.rename(columns={'통화': 'currency', '금액': '총매입금액'}, inplace=True)
+    agg_cash['평가금액_원본'] = agg_cash['총매입금액']
+    agg_cash['연금계좌'] = False # (FutureWarning 해결)
 
     # 4. 데이터 통합
-    final_portfolio = pd.concat([agg_stocks, commodities_df, cash_df], ignore_index=True)
-    final_portfolio['연금계좌'] = final_portfolio['연금계좌'].fillna(False) # 현금, 원자재는 연금계좌가 아님
+    final_portfolio = pd.concat([agg_stocks, commodities_df, agg_cash], ignore_index=True)
+    # (FutureWarning 해결) fillna 대신, 모든 데이터프레임에 '연금계좌' 컬럼이 있도록 보장
 
-    # 5. (핵심 추가) 연금계좌 필터링
+    # 5. 연금계좌 필터링
     if pension_filter == "일반계좌만":
         final_portfolio = final_portfolio[final_portfolio['연금계좌'] == False]
 
-    # 6. 통화 변환
-    if display_currency == "원화 (KRW)":
-        target_symbol = "₩"
-        is_usd = final_portfolio['currency'] == 'USD'
-        final_portfolio.loc[is_usd, '매입금액_통합'] = final_portfolio.loc[is_usd, '총매입금액'] * usd_krw_rate
-        final_portfolio.loc[is_usd, '평가금액_통합'] = final_portfolio.loc[is_usd, '평가금액_원본'] * usd_krw_rate
-        is_krw = final_portfolio['currency'] == 'KRW'
-        final_portfolio.loc[is_krw, '매입금액_통합'] = final_portfolio.loc[is_krw, '총매입금액']
-        final_portfolio.loc[is_krw, '평가금액_통합'] = final_portfolio.loc[is_krw, '평가금액_원본']
-    else: # 달러 (USD)
-        target_symbol = "$"
-        is_krw = final_portfolio['currency'] == 'KRW'
-        final_portfolio.loc[is_krw, '매입금액_통합'] = final_portfolio.loc[is_krw, '총매입금액'] / usd_krw_rate
-        final_portfolio.loc[is_krw, '평가금액_통합'] = final_portfolio.loc[is_krw, '평가금액_원본'] / usd_krw_rate
-        is_usd = final_portfolio['currency'] == 'USD'
-        final_portfolio.loc[is_usd, '매입금액_통합'] = final_portfolio.loc[is_usd, '총매입금액']
-        final_portfolio.loc[is_usd, '평가금액_통합'] = final_portfolio.loc[is_usd, '평가금액_원본']
+    # 6. 통화 변환 로직
+    def convert_currency(row):
+        purchase_val = row['총매입금액']
+        eval_val = row['평가금액_원본']
+        
+        if display_currency == "원화 (KRW)":
+            if row['currency'] == 'USD':
+                return purchase_val * usd_krw_rate, eval_val * usd_krw_rate
+        else: # 달러 (USD)
+            if row['currency'] == 'KRW':
+                return purchase_val / usd_krw_rate, eval_val / usd_krw_rate
+        return purchase_val, eval_val
+
+    final_portfolio[['매입금액_통합', '평가금액_통합']] = final_portfolio.apply(
+        convert_currency, axis=1, result_type='expand'
+    )
+    
+    target_symbol = "₩" if display_currency == "원화 (KRW)" else "$"
 
     final_portfolio['수익금_통합'] = final_portfolio['평가금액_통합'] - final_portfolio['매입금액_통합']
     final_portfolio['수익률'] = final_portfolio['수익금_통합'].divide(final_portfolio['매입금액_통합']).multiply(100).fillna(0)
@@ -227,3 +234,23 @@ if usd_krw_rate:
             textposition='inside', insidetextfont=dict(size=14)
         )
         st.plotly_chart(fig_pie_ticker, use_container_width=True)
+
+    # (핵심 추가) 상세 현황 테이블
+    st.divider()
+    st.subheader(f"📊 자산 상세 현황 ({target_symbol})")
+    
+    display_cols = ['ticker', '카테고리', '수량', '매입금액_통합', '평가금액_통합', '수익금_통합', '수익률', '연금계좌']
+    
+    # 현금, 원자재는 수량 컬럼이 없으므로 0으로 채움
+    final_portfolio['수량'] = final_portfolio['수량'].fillna(0)
+
+    styled_df = final_portfolio[display_cols].style.format({
+        '수량': '{:,.4f}',
+        '매입금액_통합': target_symbol + '{:,.0f}',
+        '평가금액_통합': target_symbol + '{:,.0f}',
+        '수익금_통합': target_symbol + '{:,.0f}',
+        '수익률': '{:.2f}%'
+    }).background_gradient(cmap='RdYlGn', subset=['수익률'], vmin=-20, vmax=20)
+    
+    st.dataframe(styled_df, use_container_width=True, hide_index=True)
+
