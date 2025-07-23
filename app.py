@@ -9,8 +9,9 @@ from data import fetcher
 from core import calculator, charting
 from utils import settings
 
-# --- 자동 새로고침 설정 (60초마다) ---
-st_autorefresh(interval=60 * 1000, key="data_refresher")
+
+# --- 자동 새로고침 설정 (10초마다) ---
+st_autorefresh(interval=10 * 1000, key="data_refresher")
 
 
 # --- 페이지 기본 설정 ---
@@ -51,10 +52,9 @@ def main():
         st.title(f'{ticker}')
     st.divider()
 
-    # 4. 데이터 로드 및 차트 생성
+    # 4. 데이터 로드 및 차트 생성 (앱 전체가 10초마다 자동 새로고침)
     try:
         with st.spinner('데이터를 불러오는 중입니다...'):
-            # yfinance로부터 일봉 데이터 로드
             data = fetcher.load_daily_data(ticker)
 
         if data.empty:
@@ -84,10 +84,8 @@ def main():
             else:
                 period = int(ma.replace('MA', ''))
                 display_cols.append(f'MA_{period}')
-        
         chart_data = df_with_indicators.tail(200)
         st.dataframe(chart_data.tail(10)[display_cols].style.format("{:.2f}"))
-
     except Exception as e:
         st.error("차트를 그리거나 데이터를 처리하는 중 오류가 발생했습니다.")
         st.exception(e)

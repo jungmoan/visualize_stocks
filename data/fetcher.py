@@ -8,7 +8,7 @@ import os
 
 # --- 로컬 캐시 설정 ---
 CACHE_DIR = "cache" # 데이터를 저장할 폴더 이름
-CACHE_TTL_SECONDS = 15 * 60 # 캐시 유효 시간 (15분)
+CACHE_TTL_SECONDS = 1 # 캐시 유효 시간 (10초)
 
 def load_daily_data(ticker_symbol):
     """
@@ -20,27 +20,43 @@ def load_daily_data(ticker_symbol):
 
     # 1. 캐시 파일 확인
     if os.path.exists(file_path):
-        mod_time = os.path.getmtime(file_path)
-        if (datetime.now().timestamp() - mod_time) < CACHE_TTL_SECONDS:
-            print(f"Loading '{ticker_symbol}' from local cache.")
+        try:
+            df = pd.read_csv(file_path, index_col='Date', parse_dates=True)
+            if not isinstance(df.index, pd.DatetimeIndex):
+                raise Exception('Invalid index')
+        except Exception:
+            print(f"Corrupted cache file detected for '{ticker_symbol}'. Deleting and refetching.")
+            os.remove(file_path)
+            df = None
+        if df is not None and not df.empty:
+            # yfinance에서 최신 1개만 받아 마지막 행만 갱신
+            print(f"Updating last row for '{ticker_symbol}' from yfinance.")
             try:
-                df = pd.read_csv(file_path, index_col='Date', parse_dates=True)
-                if isinstance(df.index, pd.DatetimeIndex):
-                    return df
-            except Exception:
-                # 파일이 손상되었을 수 있으므로, 삭제하고 새로 받도록 처리
-                print(f"Corrupted cache file detected for '{ticker_symbol}'. Deleting and refetching.")
-                os.remove(file_path)
-
-    # 2. 캐시가 없거나, 오래되었거나, 로딩에 실패했으면 yfinance에서 데이터 가져오기
-    print(f"Fetching '{ticker_symbol}' from yfinance.")
+                latest = yf.download(ticker_symbol, period='2d', interval='1d', auto_adjust=True)
+                if isinstance(latest.columns, pd.MultiIndex):
+                    latest.columns = latest.columns.get_level_values(0)
+                    latest = latest.loc[:,~latest.columns.duplicated()]
+                if not latest.empty:
+                    # 최신 날짜만 추출
+                    last_row = latest.iloc[[-1]]
+                    last_row.index.name = 'Date'
+                    # 기존 df에서 같은 날짜가 있으면 교체, 없으면 추가
+                    df = df[df.index != last_row.index[0]]
+                    df = pd.concat([df, last_row])
+                    df = df.sort_index()
+                    df.to_csv(file_path, index_label='Date')
+                    print(f"Updated last row and saved '{ticker_symbol}' to local cache.")
+                return df
+            except Exception as e:
+                print(f"Failed to update last row for {ticker_symbol}: {e}")
+                return df
+    # 캐시가 없거나, 로딩에 실패했으면 yfinance에서 전체 데이터 가져오기
+    print(f"Fetching '{ticker_symbol}' from yfinance (full download).")
     try:
         data = yf.download(ticker_symbol, period='500d', interval='1d', auto_adjust=True)
-        
         if isinstance(data.columns, pd.MultiIndex):
             data.columns = data.columns.get_level_values(0)
             data = data.loc[:,~data.columns.duplicated()]
-
         if not data.empty:
             data.to_csv(file_path, index_label='Date')
             print(f"Saved '{ticker_symbol}' to local cache.")

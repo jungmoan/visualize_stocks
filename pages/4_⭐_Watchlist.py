@@ -56,7 +56,7 @@ with st.expander("✏️ 관심종목 편집하기 (포트폴리오 종목은 �
         save_manual_watchlist_to_file(edited_watchlist, asset_tickers)
         st.toast("관심종목이 저장되었습니다!", icon="🎉")
         # 저장이 성공하면 페이지를 다시 실행하여 최신 상태를 반영
-        st.experimental_rerun()
+        st.rerun()
 
 st.divider()
 

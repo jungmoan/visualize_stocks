@@ -13,6 +13,8 @@ def display():
     asset_tickers, watchlist_tickers = [], []
     asset_path = os.path.join('private', 'asset.csv')
     watchlist_path = os.path.join('private', 'watchlist.csv')
+    asset_mtime = os.path.getmtime(asset_path) if os.path.exists(asset_path) else 0
+    watchlist_mtime = os.path.getmtime(watchlist_path) if os.path.exists(watchlist_path) else 0
     if os.path.exists(asset_path):
         try:
             asset_df = pd.read_csv(asset_path)
@@ -28,8 +30,8 @@ def display():
 
     st.sidebar.subheader('Select Ticker')
     col1, col2 = st.sidebar.columns(2)
-    selected_asset = col1.selectbox('From My Assets', [''] + asset_tickers, index=0, key='asset_ticker')
-    selected_watch = col2.selectbox('From Watchlist', [''] + watchlist_tickers, index=0, key='watchlist_ticker')
+    selected_asset = col1.selectbox('From My Assets', [''] + asset_tickers, index=0, key=f'asset_ticker_{asset_mtime}')
+    selected_watch = col2.selectbox('From Watchlist', [''] + watchlist_tickers, index=0, key=f'watchlist_ticker_{watchlist_mtime}')
     # 기존 텍스트 입력도 유지
     ticker_input = st.sidebar.text_input('Or type Ticker', value='GOOGL', help='예: AAPL, GOOG, MSFT').upper()
 
@@ -80,11 +82,11 @@ def display():
 
     # --- 보조지표 선택 ---
     st.sidebar.subheader('보조지표')
-    show_bbands = st.sidebar.checkbox('볼린저 밴드 (Bollinger Bands)')
+    show_bbands = st.sidebar.checkbox('볼린저 밴드 (Bollinger Bands)', value=True)
     show_rsi = st.sidebar.checkbox('상대강도지수 (RSI)')
     show_macd = st.sidebar.checkbox('MACD')
     show_stoch = st.sidebar.checkbox('스토캐스틱 (Stochastic)')
-    show_squeeze = st.sidebar.checkbox('스퀴즈 모멘텀 (Squeeze Momentum)')
+    show_squeeze = st.sidebar.checkbox('스퀴즈 모멘텀 (Squeeze Momentum)', value=True)
 
     # 사용자의 모든 입력을 딕셔너리로 묶어 반환
     return {
