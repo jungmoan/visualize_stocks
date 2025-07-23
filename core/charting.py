@@ -19,13 +19,14 @@ def _prepare_squeeze_plots(chart_data, panel_idx):
     sqz_on_marker = pd.Series(0, index=chart_data.index).where(chart_data['SQZ_ON_CUSTOM'])
     sqz_off_marker = pd.Series(0, index=chart_data.index).where(chart_data['SQZ_OFF_CUSTOM'])
     
+    # secondary_y=False를 명시하여 오른쪽 Y축이 생기지 않도록 합니다.
     plots.extend([
-        mpf.make_addplot(sqz_pos_inc, type='bar', panel=panel_idx, color='lightgreen', title='Squeeze Momentum'),
-        mpf.make_addplot(sqz_pos_dec, type='bar', panel=panel_idx, color='darkgreen'),
-        mpf.make_addplot(sqz_neg_inc, type='bar', panel=panel_idx, color='lightcoral'),
-        mpf.make_addplot(sqz_neg_dec, type='bar', panel=panel_idx, color='darkred'),
-        mpf.make_addplot(sqz_on_marker, type='scatter', panel=panel_idx, color='black', marker='+'),
-        mpf.make_addplot(sqz_off_marker, type='scatter', panel=panel_idx, color='green', marker='+')
+        mpf.make_addplot(sqz_pos_inc, type='bar', panel=panel_idx, color='lightgreen', title='Squeeze Momentum', secondary_y=False),
+        mpf.make_addplot(sqz_pos_dec, type='bar', panel=panel_idx, color='darkgreen', secondary_y=False),
+        mpf.make_addplot(sqz_neg_inc, type='bar', panel=panel_idx, color='lightcoral', secondary_y=False),
+        mpf.make_addplot(sqz_neg_dec, type='bar', panel=panel_idx, color='darkred', secondary_y=False),
+        mpf.make_addplot(sqz_on_marker, type='scatter', panel=panel_idx, color='black', marker='+', secondary_y=False),
+        mpf.make_addplot(sqz_off_marker, type='scatter', panel=panel_idx, color='green', marker='+', secondary_y=False)
     ])
     return plots
 
@@ -50,21 +51,21 @@ def create_stock_chart(df, user_inputs, company_name, currency='USD'):
         ])
 
     if user_inputs['show_rsi'] and 'RSI_14' in chart_data.columns:
-        add_plots.append(mpf.make_addplot(chart_data['RSI_14'], panel=panel_idx, color='green', title='RSI(14)'))
+        add_plots.append(mpf.make_addplot(chart_data['RSI_14'], panel=panel_idx, color='green', title='RSI(14)', secondary_y=False))
         panel_idx += 1
 
     if user_inputs['show_macd'] and all(c in chart_data.columns for c in ['MACD_12_26_9', 'MACDs_12_26_9', 'MACDh_12_26_9']):
         add_plots.extend([
-            mpf.make_addplot(chart_data['MACD_12_26_9'], panel=panel_idx, color='blue', title='MACD'),
-            mpf.make_addplot(chart_data['MACDs_12_26_9'], panel=panel_idx, color='red', linestyle='--'),
-            mpf.make_addplot(chart_data['MACDh_12_26_9'], type='bar', panel=panel_idx, color='gray', alpha=0.5)
+            mpf.make_addplot(chart_data['MACD_12_26_9'], panel=panel_idx, color='blue', title='MACD', secondary_y=False),
+            mpf.make_addplot(chart_data['MACDs_12_26_9'], panel=panel_idx, color='red', linestyle='--', secondary_y=False),
+            mpf.make_addplot(chart_data['MACDh_12_26_9'], type='bar', panel=panel_idx, color='gray', alpha=0.5, secondary_y=False)
         ])
         panel_idx += 1
 
     if user_inputs['show_stoch'] and all(c in chart_data.columns for c in ['STOCHk_14_3_3', 'STOCHd_14_3_3']):
         add_plots.extend([
-            mpf.make_addplot(chart_data['STOCHk_14_3_3'], panel=panel_idx, color='blue', title='Stochastic'),
-            mpf.make_addplot(chart_data['STOCHd_14_3_3'], panel=panel_idx, color='red', linestyle='--')
+            mpf.make_addplot(chart_data['STOCHk_14_3_3'], panel=panel_idx, color='blue', title='Stochastic', secondary_y=False),
+            mpf.make_addplot(chart_data['STOCHd_14_3_3'], panel=panel_idx, color='red', linestyle='--', secondary_y=False)
         ])
         panel_idx += 1
 
@@ -134,13 +135,31 @@ def create_stock_chart(df, user_inputs, company_name, currency='USD'):
         if not sell_points.empty:
             ax_main.scatter(date_to_loc[sell_points.index], sell_points.values, marker='v', color='red', s=120, zorder=10, label='SMI Sell (Zero-Cross)')
 
-    # --- 최신가 라인 추가 ---
-    latest_price = chart_data['Close'].iloc[-1]
-    latest_price_formatted = f'{latest_price:,.2f}'
-    ax_main.axhline(y=latest_price, color='dodgerblue', linestyle='--', linewidth=1, alpha=0.7)
-    ax_main.text(len(chart_data)-1, latest_price, f' {latest_price_formatted}',
-                 color='white', verticalalignment='center',
-                 bbox=dict(facecolor='dodgerblue', alpha=0.9, pad=2, boxstyle='round,pad=0.2'))
+    # --- (핵심 수정) 최신가 및 등락률 텍스트를 마지막 캔들 위에 표시 ---
+    if len(chart_data) >= 2:
+        latest_candle = chart_data.iloc[-1]
+        previous_close = chart_data['Close'].iloc[-2]
+        
+        daily_change = latest_candle['Close'] - previous_close
+        daily_percent_change = (daily_change / previous_close) * 100 if previous_close != 0 else 0
+
+        # 등락에 따라 색상 결정
+        price_label_color = 'darkgreen' if daily_change >= 0 else 'darkred'
+
+        # 표시될 텍스트 생성
+        price_label_text = f'{latest_candle["Close"]:,.2f} ({daily_percent_change:+.2f}%)'
+
+        # 텍스트를 마지막 캔들 위쪽에 위치시키기 위한 y 좌표 계산
+        y_range = ax_main.get_ylim()[1] - ax_main.get_ylim()[0]
+        y_position = latest_candle['High'] + y_range * 0.05 # 캔들 최고가보다 5% 위에 위치
+
+        # 텍스트 박스 그리기
+        ax_main.text(len(chart_data) - 1, y_position, f' {price_label_text} ',
+                     color='white',
+                     verticalalignment='bottom', # 텍스트 박스의 하단을 y_position에 맞춤
+                     horizontalalignment='center', # 캔들 중앙에 위치
+                     fontsize=14, 
+                     bbox=dict(facecolor=price_label_color, alpha=0.9, pad=4, boxstyle='round,pad=0.4'))
 
     if user_inputs['selected_ma_periods'] or (user_inputs['show_squeeze'] and (not buy_signal_prices.empty or not sell_signal_prices.empty)):
         ax_main.legend(loc='upper left')
