@@ -12,7 +12,7 @@ CACHE_TTL_SECONDS = 15 * 60 # 캐시 유효 시간 (15분)
 
 def load_daily_data(ticker_symbol):
     """
-    (핵심 수정) 지정된 티커의 일봉 데이터를 다운로드합니다.
+    지정된 티커의 일봉 데이터를 다운로드합니다.
     데이터 저장 전, 복잡한 헤더를 정리하여 캐시 파일의 안정성을 높였습니다.
     """
     os.makedirs(CACHE_DIR, exist_ok=True)
@@ -35,18 +35,13 @@ def load_daily_data(ticker_symbol):
     # 2. 캐시가 없거나, 오래되었거나, 로딩에 실패했으면 yfinance에서 데이터 가져오기
     print(f"Fetching '{ticker_symbol}' from yfinance.")
     try:
-        data = yf.download(ticker_symbol, period='500d', interval='1d')
+        data = yf.download(ticker_symbol, period='500d', interval='1d', auto_adjust=True)
         
-        # --- (핵심 수정) yfinance가 복잡한 헤더를 반환하는 경우에 대한 처리 ---
         if isinstance(data.columns, pd.MultiIndex):
-            # 복잡한 헤더를 단순한 형태로 변환 (예: ('Close', 'GOOGL') -> 'Close')
             data.columns = data.columns.get_level_values(0)
-            # 중복된 컬럼이 생길 경우를 대비해 제거
             data = data.loc[:,~data.columns.duplicated()]
-        # --- 수정 끝 ---
 
         if not data.empty:
-            # 3. 향후 오류를 방지하기 위해 항상 'Date'라는 이름으로 인덱스를 저장
             data.to_csv(file_path, index_label='Date')
             print(f"Saved '{ticker_symbol}' to local cache.")
         return data
@@ -61,7 +56,7 @@ def get_current_prices(ticker_list):
     if not ticker_list:
         return pd.Series(dtype=float)
     try:
-        data = yf.download(tickers=ticker_list, period='2d', progress=False)
+        data = yf.download(tickers=ticker_list, period='2d', progress=False, auto_adjust=True)
         if data.empty or 'Close' not in data:
             return pd.Series(dtype=float)
         
@@ -78,58 +73,60 @@ def get_current_prices(ticker_list):
 @st.cache_data(ttl=60) # 1분 캐시
 def get_watchlist_data(ticker_list):
     """
-    (핵심 재작성) 관심종목 데이터를 가져옵니다. 
-    1개 티커와 여러 개 티커의 경우를 명확히 구분하여 항상 안정적인 데이터프레임을 반환합니다.
+    (핵심 수정) 관심종목 데이터를 가져옵니다. 
+    안정성을 위해 한국 주식과 그 외 주식을 분리하여 조회합니다.
     """
     if not ticker_list:
         return pd.DataFrame()
     
     try:
-        data = yf.download(tickers=ticker_list, period='2d', progress=False)
+        # 1. 티커를 한국 주식과 그 외로 분리
+        kr_tickers = [t for t in ticker_list if '.KS' in t.upper()]
+        other_tickers = [t for t in ticker_list if '.KS' not in t.upper()]
         
-        if data.empty or len(data) < 2:
-            return pd.DataFrame()
+        all_data = pd.DataFrame()
 
-        # Case 1: Single Ticker
-        if len(ticker_list) == 1:
-            ticker = ticker_list[0]
-            if 'Close' not in data.columns or data['Close'].isnull().all():
-                return pd.DataFrame() # 데이터가 없는 경우
+        # 2. 각 그룹별로 데이터 조회 및 통합
+        for group in [kr_tickers, other_tickers]:
+            if not group:
+                continue
+            
+            data = yf.download(tickers=group, period='2d', progress=False, auto_adjust=True)
+            if data.empty or len(data) < 2:
+                continue
 
-            latest = data.iloc[-1]
-            previous = data.iloc[-2]
-            
-            change = latest['Close'] - previous['Close']
-            percent_change = (change / previous['Close']) * 100 if previous['Close'] != 0 else 0
-            
-            return pd.DataFrame([{
-                'Ticker': ticker,
-                'Current Price': latest['Close'],
-                'Change': change,
-                '% Change': percent_change,
-                'Volume': latest['Volume']
-            }])
+            # 데이터 구조 표준화
+            if len(group) == 1:
+                latest = data.iloc[-1]
+                previous = data.iloc[-2]
+                change = latest['Close'] - previous['Close']
+                percent_change = (change / previous['Close']) * 100 if previous['Close'] != 0 else 0
+                
+                group_df = pd.DataFrame([{
+                    'Ticker': group[0], 'Current Price': latest['Close'],
+                    'Change': change, '% Change': percent_change,
+                    'Volume': latest['Volume']
+                }])
+            else:
+                latest = data.iloc[-1]
+                previous = data.iloc[-2]
+                
+                valid_tickers = latest['Close'].dropna().index
+                
+                change = latest['Close'][valid_tickers] - previous['Close'][valid_tickers]
+                percent_change = (change / previous['Close'][valid_tickers]) * 100
+                
+                group_df = pd.DataFrame({
+                    'Ticker': valid_tickers,
+                    'Current Price': latest['Close'][valid_tickers].values,
+                    'Change': change.values,
+                    '% Change': percent_change.values,
+                    'Volume': latest['Volume'][valid_tickers].values
+                })
 
-        # Case 2: Multiple Tickers
-        else:
-            latest = data.iloc[-1]
-            previous = data.iloc[-2]
-            
-            # 유효한 데이터가 있는 티커만 선택
-            valid_tickers = latest['Close'].dropna().index
-            
-            # 유효한 티커에 대해서만 계산 수행
-            change = latest['Close'][valid_tickers] - previous['Close'][valid_tickers]
-            percent_change = (change / previous['Close'][valid_tickers]) * 100
-            
-            result_df = pd.DataFrame({
-                'Ticker': valid_tickers,
-                'Current Price': latest['Close'][valid_tickers].values,
-                'Change': change.values,
-                '% Change': percent_change.values,
-                'Volume': latest['Volume'][valid_tickers].values
-            })
-            return result_df.dropna(subset=['Current Price'])
+            all_data = pd.concat([all_data, group_df], ignore_index=True)
+
+        return all_data.dropna(subset=['Current Price'])
 
     except Exception as e:
         print(f"Error in get_watchlist_data: {e}")

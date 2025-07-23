@@ -135,29 +135,20 @@ def create_stock_chart(df, user_inputs, company_name, currency='USD'):
         if not sell_points.empty:
             ax_main.scatter(date_to_loc[sell_points.index], sell_points.values, marker='v', color='red', s=120, zorder=10, label='SMI Sell (Zero-Cross)')
 
-    # --- (핵심 수정) 최신가 및 등락률 텍스트를 마지막 캔들 위에 표시 ---
+    # --- (핵심 수정) Latest close & percent change (regular session) only ---
     if len(chart_data) >= 2:
         latest_candle = chart_data.iloc[-1]
         previous_close = chart_data['Close'].iloc[-2]
-        
         daily_change = latest_candle['Close'] - previous_close
         daily_percent_change = (daily_change / previous_close) * 100 if previous_close != 0 else 0
-
-        # 등락에 따라 색상 결정
         price_label_color = 'darkgreen' if daily_change >= 0 else 'darkred'
-
-        # 표시될 텍스트 생성
-        price_label_text = f'{latest_candle["Close"]:,.2f} ({daily_percent_change:+.2f}%)'
-
-        # 텍스트를 마지막 캔들 위쪽에 위치시키기 위한 y 좌표 계산
+        price_label_text = f'Close: {latest_candle["Close"]:,.2f} ({daily_percent_change:+.2f}%)'
         y_range = ax_main.get_ylim()[1] - ax_main.get_ylim()[0]
-        y_position = latest_candle['High'] + y_range * 0.05 # 캔들 최고가보다 5% 위에 위치
-
-        # 텍스트 박스 그리기
+        y_position = latest_candle['High'] + y_range * 0.05
         ax_main.text(len(chart_data) - 1, y_position, f' {price_label_text} ',
                      color='white',
-                     verticalalignment='bottom', # 텍스트 박스의 하단을 y_position에 맞춤
-                     horizontalalignment='center', # 캔들 중앙에 위치
+                     verticalalignment='bottom',
+                     horizontalalignment='center',
                      fontsize=14, 
                      bbox=dict(facecolor=price_label_color, alpha=0.9, pad=4, boxstyle='round,pad=0.4'))
 

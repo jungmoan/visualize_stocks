@@ -9,7 +9,6 @@ from data import fetcher
 from core import calculator, charting
 from utils import settings
 
-
 # --- 자동 새로고침 설정 (60초마다) ---
 st_autorefresh(interval=60 * 1000, key="data_refresher")
 
@@ -47,9 +46,9 @@ def main():
     currency = stock_info.get('currency', 'USD') # 정보가 없을 경우 기본값 USD
 
     if company_name and company_name.lower() != ticker.lower():
-        st.title(f'{company_name} ({ticker}) 주가 차트 대시보드')
+        st.title(f'{company_name} ({ticker})')
     else:
-        st.title(f'{ticker} 주가 차트 대시보드')
+        st.title(f'{ticker}')
     st.divider()
 
     # 4. 데이터 로드 및 차트 생성

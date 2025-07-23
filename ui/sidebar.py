@@ -6,9 +6,35 @@ def display():
     
     st.sidebar.header('차트 설정')
 
-    # --- Ticker 입력 ---
-    ticker_input = st.sidebar.text_input('Ticker', value='GOOGL', help='예: AAPL, GOOG, MSFT').upper()
-    ticker = ticker_input.split(',')[0].strip().split(' ')[0]
+
+    # --- 보유종목/관심종목 불러오기 ---
+    import pandas as pd
+    import os
+    asset_tickers, watchlist_tickers = [], []
+    asset_path = os.path.join('private', 'asset.csv')
+    watchlist_path = os.path.join('private', 'watchlist.csv')
+    if os.path.exists(asset_path):
+        try:
+            asset_df = pd.read_csv(asset_path)
+            asset_tickers = sorted(set(str(t).strip().upper() for t in asset_df['ticker'].dropna().unique()))
+        except Exception:
+            pass
+    if os.path.exists(watchlist_path):
+        try:
+            wl_df = pd.read_csv(watchlist_path)
+            watchlist_tickers = sorted(set(str(t).strip().upper() for t in wl_df['ticker'].dropna().unique()))
+        except Exception:
+            pass
+
+    st.sidebar.subheader('Select Ticker')
+    col1, col2 = st.sidebar.columns(2)
+    selected_asset = col1.selectbox('From My Assets', [''] + asset_tickers, index=0, key='asset_ticker')
+    selected_watch = col2.selectbox('From Watchlist', [''] + watchlist_tickers, index=0, key='watchlist_ticker')
+    # 기존 텍스트 입력도 유지
+    ticker_input = st.sidebar.text_input('Or type Ticker', value='GOOGL', help='예: AAPL, GOOG, MSFT').upper()
+
+    # 우선순위: 보유종목 > 관심종목 > 직접입력
+    ticker = selected_asset or selected_watch or ticker_input
 
     # --- 이동평균선(MA) 선택 ---
     st.sidebar.subheader('이동평균선')
