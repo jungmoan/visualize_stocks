@@ -29,11 +29,16 @@ def load_assets(file_path, sample_data):
 if 'stock_portfolio_df' not in st.session_state:
     sample_stocks = {
         "ticker": ["AAPL", "SCHD", "SGOV"], "수량": [10.0, 50.0, 100.0],
-        "평균매입금액": [180.50, 75.00, 100.10], "카테고리": ["성장주", "배당주", "채권"]
+        "평균매입금액": [180.50, 75.00, 100.10], "카테고리": ["성장주", "배당주", "채권"],
+        "연금계좌": [False, True, True]
     }
     st.session_state.stock_portfolio_df = load_assets(ASSET_FILE_PATH, sample_stocks)
+    # 구버전 파일을 위한 호환성 처리
     if '카테고리' not in st.session_state.stock_portfolio_df.columns:
         st.session_state.stock_portfolio_df['카테고리'] = '성장주'
+    if '연금계좌' not in st.session_state.stock_portfolio_df.columns:
+        st.session_state.stock_portfolio_df['연금계좌'] = False
+
 
 # 원자재 포트폴리오 로딩
 if 'commodity_portfolio_df' not in st.session_state:
@@ -48,13 +53,18 @@ if 'cash_portfolio_df' not in st.session_state:
     st.session_state.cash_portfolio_df = load_assets(CASH_FILE_PATH, sample_cash)
 
 
-# --- 통화 선택 및 환율 정보 ---
-col1, col2 = st.columns([3, 1])
+# --- UI: 필터 및 환율 정보 ---
+col1, col2, col3 = st.columns([2, 2, 1])
 with col1:
     display_currency = st.radio(
-        "통합 표시 통화 선택", ["원화 (KRW)", "달러 (USD)"], horizontal=True, label_visibility="collapsed"
+        "통합 표시 통화", ["원화 (KRW)", "달러 (USD)"], horizontal=True, label_visibility="collapsed"
     )
 with col2:
+    # (핵심 추가) 연금계좌 필터 라디오 버튼
+    pension_filter = st.radio(
+        "계좌 필터", ["전체 합산", "일반계좌만"], horizontal=True, label_visibility="collapsed"
+    )
+with col3:
     usd_krw_rate, _ = fetcher.get_index_data('USDKRW=X')
     if usd_krw_rate:
         st.metric("현재 환율 (USD/KRW)", f"{usd_krw_rate:,.2f}")
@@ -69,7 +79,9 @@ with st.expander("✏️ 주식 포트폴리오 편집하기"):
             "ticker": st.column_config.TextColumn("Ticker", required=True),
             "수량": st.column_config.NumberColumn("수량", format="%.4f", required=True),
             "평균매입금액": st.column_config.NumberColumn("평균매입금액", format="%.2f", required=True),
-            "카테고리": st.column_config.SelectboxColumn("자산 종류", options=["성장주", "배당주", "채권"], required=True)
+            "카테고리": st.column_config.SelectboxColumn("자산 종류", options=["성장주", "배당주", "채권"], required=True),
+            # (핵심 추가) 연금계좌 여부 체크박스 컬럼
+            "연금계좌": st.column_config.CheckboxColumn("연금계좌", default=False)
         }
     )
     if st.button("💾 주식 저장", use_container_width=True):
@@ -113,7 +125,8 @@ if usd_krw_rate:
     stocks_df.dropna(subset=["ticker", "수량", "평균매입금액", "카테고리"], inplace=True)
     stocks_df['총매입금액'] = pd.to_numeric(stocks_df['수량']) * pd.to_numeric(stocks_df['평균매입금액'])
     agg_stocks = stocks_df.groupby('ticker').agg(
-        수량=('수량', 'sum'), 총매입금액=('총매입금액', 'sum'), 카테고리=('카테고리', 'first')
+        수량=('수량', 'sum'), 총매입금액=('총매입금액', 'sum'), 
+        카테고리=('카테고리', 'first'), 연금계좌=('연금계좌', 'first')
     ).reset_index()
     
     tickers = agg_stocks["ticker"].tolist()
@@ -137,12 +150,17 @@ if usd_krw_rate:
     cash_df['ticker'] = cash_df['통화'].apply(lambda x: f"{x} 현금")
     cash_df['카테고리'] = '현금'
     cash_df.rename(columns={'통화': 'currency', '금액': '총매입금액'}, inplace=True)
-    cash_df['평가금액_원본'] = cash_df['총매입금액'] # 현금의 가치는 변하지 않음
+    cash_df['평가금액_원본'] = cash_df['총매입금액']
 
     # 4. 데이터 통합
     final_portfolio = pd.concat([agg_stocks, commodities_df, cash_df], ignore_index=True)
+    final_portfolio['연금계좌'] = final_portfolio['연금계좌'].fillna(False) # 현금, 원자재는 연금계좌가 아님
 
-    # 5. 통화 변환
+    # 5. (핵심 추가) 연금계좌 필터링
+    if pension_filter == "일반계좌만":
+        final_portfolio = final_portfolio[final_portfolio['연금계좌'] == False]
+
+    # 6. 통화 변환
     if display_currency == "원화 (KRW)":
         target_symbol = "₩"
         is_usd = final_portfolio['currency'] == 'USD'
@@ -163,7 +181,7 @@ if usd_krw_rate:
     final_portfolio['수익금_통합'] = final_portfolio['평가금액_통합'] - final_portfolio['매입금액_통합']
     final_portfolio['수익률'] = final_portfolio['수익금_통합'].divide(final_portfolio['매입금액_통합']).multiply(100).fillna(0)
 
-    # 6. 요약 및 시각화
+    # 7. 요약 및 시각화
     st.divider()
     total_evaluation = final_portfolio['평가금액_통합'].sum()
     total_purchase = final_portfolio['매입금액_통합'].sum()
@@ -177,7 +195,6 @@ if usd_krw_rate:
     cols[2].metric("총 손익", f"{target_symbol}{total_profit:,.0f}", f"{total_return_rate:.2f}%")
     
     st.divider()
-    # 상세 현황 표시는 생략
 
     viz_cols = st.columns(2)
     with viz_cols[0]:
@@ -190,35 +207,23 @@ if usd_krw_rate:
 
     with viz_cols[1]:
         st.subheader("개별 자산 비중 (상위 5개)")
-        
-        # (핵심 수정) 상위 5개 자산만 라벨을 표시하도록 로직 변경
-        # 1. 평가금액 기준으로 데이터 정렬
         sorted_portfolio = final_portfolio.sort_values(by='평가금액_통합', ascending=False)
-        
-        # 2. 전체 평가금액 합계 계산
         total_eval_sum = sorted_portfolio['평가금액_통합'].sum()
-        
-        # 3. 상위 5개 티커 추출
         top_5_tickers = sorted_portfolio.head(5)['ticker'].tolist()
         
-        # 4. 파이 차트에 표시될 텍스트 라벨 생성
         def get_pie_label(row):
             if row['ticker'] in top_5_tickers and total_eval_sum > 0:
                 percentage = (row['평가금액_통합'] / total_eval_sum) * 100
                 return f"{row['ticker']}<br>{percentage:.1f}%"
-            return "" # 상위 5개가 아니면 라벨 없음
+            return ""
 
         sorted_portfolio['pie_label'] = sorted_portfolio.apply(get_pie_label, axis=1)
 
-        # 5. 파이 차트 생성
         fig_pie_ticker = px.pie(sorted_portfolio, names='ticker', values='평가금액_통합',
                                  title=f"평가금액({target_symbol}) 기준", hole=0.3)
         
-        # 6. 차트 업데이트: 생성된 라벨을 사용하고, 글자 크기 조정
         fig_pie_ticker.update_traces(
-            text=sorted_portfolio['pie_label'],
-            textinfo='text',
-            textposition='inside',
-            insidetextfont=dict(size=14) # 라벨 폰트 크기
+            text=sorted_portfolio['pie_label'], textinfo='text',
+            textposition='inside', insidetextfont=dict(size=14)
         )
         st.plotly_chart(fig_pie_ticker, use_container_width=True)
