@@ -78,7 +78,12 @@ def main():
         st.subheader('최근 10일 데이터')
         display_cols = ['Open', 'High', 'Low', 'Close', 'Volume']
         for ma in user_inputs['selected_ma_periods']:
-            display_cols.append(f'MA_{ma}')
+            if ma.startswith('EMA'):
+                period = int(ma.replace('EMA', ''))
+                display_cols.append(f'EMA_{period}')
+            else:
+                period = int(ma.replace('MA', ''))
+                display_cols.append(f'MA_{period}')
         
         chart_data = df_with_indicators.tail(200)
         st.dataframe(chart_data.tail(10)[display_cols].style.format("{:.2f}"))
