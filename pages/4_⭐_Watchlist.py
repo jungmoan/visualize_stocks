@@ -60,58 +60,76 @@ with st.expander("✏️ 관심종목 편집하기 (포트폴리오 종목은 �
 
 st.divider()
 
-# --- 데이터 처리 및 시세 표시 ---
+# --- 데이터 처리 및 시세 표시 (구역별로 분리) ---
 # 편집기에서 실시간으로 변경된 내용을 반영
-watchlist_tickers = edited_watchlist['ticker'].dropna().unique().tolist()
+all_watchlist_tickers = edited_watchlist['ticker'].dropna().unique().tolist()
 
-if not watchlist_tickers:
-    st.info("포트폴리오에 종목을 추가하거나, 위의 편집기에서 관심종목을 추가하고 저장해주세요.")
-else:
-    st.subheader("📈 실시간 시세")
-    with st.spinner("관심종목의 최신 데이터를 불러오는 중입니다..."):
-        watchlist_data = fetcher.get_watchlist_data(watchlist_tickers)
+# 관심종목과 포트폴리오 종목을 분리
+pure_watchlist_tickers = [t for t in all_watchlist_tickers if t not in asset_tickers]
+portfolio_tickers = [t for t in all_watchlist_tickers if t in asset_tickers]
 
-        if watchlist_data.empty:
+def display_ticker_section(tickers, title, icon):
+    """티커 목록에 대한 섹션을 표시하는 함수"""
+    if not tickers:
+        st.info(f"{title}에 종목이 없습니다.")
+        return
+    
+    st.subheader(f"{icon} {title}")
+    with st.spinner(f"{title} 데이터를 불러오는 중입니다..."):
+        data = fetcher.get_watchlist_data(tickers)
+        
+        if data.empty:
             st.warning("데이터를 불러오지 못했습니다. 티커를 확인해주세요.")
-        else:
-            # 데이터 정제
-            for col in ['Current Price', 'Change', '% Change']:
-                if col in watchlist_data.columns:
-                    watchlist_data[col] = pd.to_numeric(watchlist_data[col], errors='coerce').fillna(0)
-            
-            # 메트릭 뷰
-            num_cols = min(len(watchlist_data), 4)
-            cols = st.columns(num_cols)
-            for i, row in watchlist_data.iterrows():
-                with cols[i % num_cols]:
-                    change_val = row.get('Change', 0)
-                    price_val = row.get('Current Price', 0)
-                    percent_val = row.get('% Change', 0)
-                    
-                    delta_color = "normal" if change_val != 0 else "off"
-                    
-                    st.metric(
-                        label=row['Ticker'],
-                        value=f"{price_val:,.2f}",
-                        delta=f"{change_val:,.2f} ({percent_val:.2f}%)",
-                        delta_color=delta_color
-                    )
-            
-            st.divider()
+            return
+        
+        # 데이터 정제
+        for col in ['Current Price', 'Change', '% Change']:
+            if col in data.columns:
+                data[col] = pd.to_numeric(data[col], errors='coerce').fillna(0)
+        
+        # 메트릭 뷰
+        num_cols = min(len(data), 4)
+        cols = st.columns(num_cols)
+        for i, row in data.iterrows():
+            with cols[i % num_cols]:
+                change_val = row.get('Change', 0)
+                price_val = row.get('Current Price', 0)
+                percent_val = row.get('% Change', 0)
+                
+                delta_color = "normal" if change_val != 0 else "off"
+                
+                st.metric(
+                    label=row['Ticker'],
+                    value=f"{price_val:,.2f}",
+                    delta=f"{change_val:,.2f} ({percent_val:.2f}%)",
+                    delta_color=delta_color
+                )
+        
+        # 테이블 뷰
+        display_table_df = data.set_index('Ticker')
+        
+        def style_change(val):
+            return 'color: red' if val < 0 else 'color: green' if val > 0 else 'color: gray'
 
-            # 테이블 뷰
-            display_table_df = watchlist_data.set_index('Ticker')
-            
-            def style_change(val):
-                return 'color: red' if val < 0 else 'color: green' if val > 0 else 'color: gray'
+        format_mapping = {
+            'Current Price': '{:,.2f}',
+            'Change': '{:+,.2f}',
+            '% Change': '{:+.2f}%'
+        }
+        
+        st.dataframe(
+            display_table_df.style.format(format_mapping).map(style_change, subset=['Change', '% Change']),
+            use_container_width=True
+        )
 
-            format_mapping = {
-                'Current Price': '{:,.2f}',
-                'Change': '{:+,.2f}',
-                '% Change': '{:+.2f}%'
-            }
-            
-            st.dataframe(
-                display_table_df.style.format(format_mapping).map(style_change, subset=['Change', '% Change']),
-                use_container_width=True
-            )
+# 1. 관심종목 구간
+display_ticker_section(pure_watchlist_tickers, "관심종목", "⭐")
+
+if pure_watchlist_tickers and portfolio_tickers:
+    st.divider()
+
+# 2. 포트폴리오 보유종목 구간  
+display_ticker_section(portfolio_tickers, "포트폴리오 보유종목", "💼")
+
+if not pure_watchlist_tickers and not portfolio_tickers:
+    st.info("포트폴리오에 종목을 추가하거나, 위의 편집기에서 관심종목을 추가하고 저장해주세요.")
