@@ -23,5 +23,10 @@
         "color": "#0019ff",
         "linewidth": 3.0,
         "linestyle": "-"
+    },
+    "EMA200": {
+        "color": "#888888",
+        "linewidth": 5.0,
+        "linestyle": "-"
     }
 }

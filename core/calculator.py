@@ -49,9 +49,18 @@ def calculate_all_indicators(df, user_inputs):
             df_copy[col] = pd.to_numeric(df_copy[col], errors='coerce')
     df_copy.dropna(subset=ohlcv_cols, inplace=True)
 
-    # 이동평균선 계산
-    for ma in user_inputs['selected_ma_periods']:
-        df_copy[f'MA_{ma}'] = ta.sma(df_copy['Close'], length=ma)
+    # 이동평균선 및 EMA 계산
+    for ma_name in user_inputs['selected_ma_periods']:
+        if str(ma_name).startswith('EMA'):
+            period = int(str(ma_name).replace('EMA', ''))
+            ema_col = f'EMA_{period}'
+            if ema_col not in df_copy.columns:
+                df_copy[ema_col] = df_copy['Close'].ewm(span=period, adjust=False).mean()
+        else:
+            period = int(str(ma_name).replace('MA', ''))
+            ma_col = f'MA_{period}'
+            if ma_col not in df_copy.columns:
+                df_copy[ma_col] = df_copy['Close'].rolling(period).mean()
     
     # 기타 보조지표 계산
     if user_inputs['show_bbands']:

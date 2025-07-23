@@ -117,10 +117,14 @@ def create_stock_chart(df, user_inputs, company_name, currency='USD'):
         axes[i].tick_params(axis='x', labelsize=12)
 
     # --- 이동평균선 및 매매 신호 추가 ---
-    for ma_period in user_inputs['selected_ma_periods']:
-        ma_name = f'MA{ma_period}'
-        style = st.session_state.ma_styles[ma_name]
-        ma_col = f'MA_{ma_period}'
+    for ma_name in user_inputs['selected_ma_periods']:
+        if ma_name.startswith('EMA'):
+            period = int(ma_name.replace('EMA', ''))
+            ma_col = f'EMA_{period}'
+        else:
+            period = int(ma_name.replace('MA', ''))
+            ma_col = f'MA_{period}'
+        style = st.session_state.ma_styles.get(ma_name, {'color':'#888','linewidth':1.5,'linestyle':'-'})
         if ma_col in chart_data.columns:
             ax_main.plot(range(len(chart_data.index)), chart_data[ma_col], 
                          color=style['color'], label=ma_name, 

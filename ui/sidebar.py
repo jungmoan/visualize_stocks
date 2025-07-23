@@ -39,7 +39,7 @@ def display():
     # --- 이동평균선(MA) 선택 ---
     st.sidebar.subheader('이동평균선')
     ma_options = {
-        'MA5': 5, 'MA20': 20, 'MA60': 60, 'MA120': 120, 'MA200': 200
+        'MA5': 5, 'MA20': 20, 'MA60': 60, 'MA120': 120, 'MA200': 200, 'EMA200': 200
     }
     
     selected_ma_periods = []
@@ -47,11 +47,18 @@ def display():
     default_ma_selection = ['MA20', 'MA200']
     for ma_name, ma_period in ma_options.items():
         if st.sidebar.checkbox(ma_name, value=(ma_name in default_ma_selection)):
-            selected_ma_periods.append(ma_period)
+            selected_ma_periods.append(ma_name)
 
     # --- 이동평균선 스타일 설정 ---
     with st.sidebar.expander("⚙️ 이동평균선 스타일 설정"):
         for ma_name, _ in ma_options.items():
+            # 기본 스타일이 없으면 자동 추가
+            if ma_name not in st.session_state.ma_styles:
+                st.session_state.ma_styles[ma_name] = {
+                    'color': '#888888' if 'EMA' in ma_name else '#1976d2',
+                    'linewidth': 2.0,
+                    'linestyle': '-' if 'EMA' in ma_name else '-',
+                }
             st.write(f"**{ma_name}**")
             cols = st.columns(3)
             current_style = st.session_state.ma_styles[ma_name]
@@ -65,13 +72,10 @@ def display():
             if (new_color != current_style['color'] or
                 new_width != current_style['linewidth'] or
                 new_style_str != current_style['linestyle']):
-                
                 st.session_state.ma_styles[ma_name]['color'] = new_color
                 st.session_state.ma_styles[ma_name]['linewidth'] = new_width
                 st.session_state.ma_styles[ma_name]['linestyle'] = new_style_str
-                
                 settings.save_styles(st.session_state.ma_styles)
-                # 변경 즉시 반영을 위해 페이지 새로고침 (선택적)
                 # st.experimental_rerun()
 
     # --- 보조지표 선택 ---
