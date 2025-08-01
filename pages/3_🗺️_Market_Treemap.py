@@ -1,7 +1,12 @@
 import streamlit as st
+import auth  # 인증 모듈 추가
 
 # 페이지 레이아웃 설정
 st.set_page_config(layout="wide", page_title="마켓 맵")
+
+# --- 인증 확인 ---
+if not auth.render_authentication_ui():
+    st.stop()
 
 # 페이지 제목과 설명
 st.title("🗺️ 마켓 트라맵")

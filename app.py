@@ -8,14 +8,11 @@ from ui import sidebar, header
 from data import fetcher
 from core import calculator, charting
 from utils import settings
-
-
-# --- 자동 새로고침 설정 (10초마다) ---
-st_autorefresh(interval=10 * 1000, key="data_refresher")
+import auth  # 인증 모듈 추가
 
 
 # --- 페이지 기본 설정 ---
-st.set_page_config(layout="wide", page_title="주식 대시보드")
+st.set_page_config(layout="wide", page_title="주식 대시보드 🔐")
 
 # 메트릭 폰트 크기 조정을 위한 CSS
 st.markdown("""
@@ -25,6 +22,15 @@ st.markdown("""
 }
 </style>
 """, unsafe_allow_html=True)
+
+# --- 인증 확인 ---
+# 인증이 완료된 경우에만 앱의 나머지 부분을 실행합니다
+if not auth.render_authentication_ui():
+    st.stop()
+
+# --- 자동 새로고침 설정 (10초마다) ---
+# 인증 후에만 자동 새로고침 활성화
+st_autorefresh(interval=10 * 1000, key="data_refresher")
 
 # --- 세션 상태 초기화 ---
 # 앱이 처음 실행될 때만 스타일 설정을 로드합니다.

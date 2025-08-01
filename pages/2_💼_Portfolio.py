@@ -3,8 +3,13 @@ import pandas as pd
 import plotly.express as px
 import os
 from data import fetcher # 데이터 모듈 임포트
+import auth  # 인증 모듈 추가
 
 st.set_page_config(layout="wide", page_title="내 포트폴리오")
+
+# --- 인증 확인 ---
+if not auth.render_authentication_ui():
+    st.stop()
 
 st.title("💼 내 포트폴리오")
 st.write("주식, 원자재, 현금 등 전체 자산 현황을 분류하고 분석합니다.")

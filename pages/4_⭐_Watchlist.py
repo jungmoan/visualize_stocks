@@ -2,9 +2,15 @@ import streamlit as st
 import pandas as pd
 import os
 from data import fetcher
+import auth  # 인증 모듈 추가
 
 # --- 페이지 기본 설정 ---
 st.set_page_config(layout="wide", page_title="관심종목")
+
+# --- 인증 확인 ---
+if not auth.render_authentication_ui():
+    st.stop()
+
 st.title("⭐ 관심종목 대시보드")
 st.write("포트폴리오 종목과 직접 추가한 관심종목의 최신 시세를 확인하세요.")
 
