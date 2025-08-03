@@ -6,9 +6,19 @@ from datetime import datetime, time
 import pytz
 import os
 
+import os
+import sys
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+import data.kis_integration as kis_integration
+
 # --- 로컬 캐시 설정 ---
 CACHE_DIR = "cache" # 데이터를 저장할 폴더 이름
 CACHE_TTL_SECONDS = 1 # 캐시 유효 시간 (10초)
+
+kis = kis_integration.KISIntegration()
+
+def get_stock_info_from_KIS(ticker):
+    return kis.get_stock_info_domestic(ticker)
 
 def load_daily_data(ticker_symbol):
     """

@@ -3,10 +3,13 @@ import pandas as pd
 import plotly.express as px
 import os
 import sys
+import auth  # 인증 모듈 추가
+
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from data import fetcher
 import data.kis_integration as kis_integration
-
+# if not auth.render_authentication_ui():
+#     st.stop()
 # 자산 분류 설정 파일 경로
 ASSET_CLASSIFICATION_FILE = "private/asset_classification.csv"
 
@@ -124,8 +127,9 @@ def process_portfolio_data(balance_data, asset_classification):
 def get_current_prices_for_portfolio(tickers):
     """포트폴리오 종목들의 현재가 조회"""
     kr_tickers = [t for t in tickers if t.endswith('.KS') or len(t) == 6]
-    us_tickers = [t for t in tickers if t not in kr_tickers and t not in ['PENSION_DEPOSIT', 'OVERSEA_DEPOSIT', 'OVERSEA_KRW_DEPOSIT']]
-    
+    gold_tickers = [t for t in tickers if t == 'M04020000']
+    us_tickers = [t for t in tickers if t not in kr_tickers and t not in ['PENSION_DEPOSIT', 'OVERSEA_DEPOSIT', 'OVERSEA_KRW_DEPOSIT'] and t not in gold_tickers]
+
     prices = {}
     
     new_kr_tickers = [t+".KS" for t in kr_tickers if len(t) == 6]
@@ -137,7 +141,10 @@ def get_current_prices_for_portfolio(tickers):
     if us_tickers:
         us_prices = fetcher.get_current_prices(us_tickers)
         prices.update(us_prices.to_dict())
-    
+    if gold_tickers:
+        gold_prices = fetcher.get_stock_info_from_KIS('M04020000')
+        prices['M04020000'] = float(gold_prices['stck_prpr'].iloc[0])
+        
     return prices
 
 st.divider()
@@ -266,7 +273,9 @@ if not portfolio_df.empty:
     # 계좌명 매핑
     account_names = {
         '43143043': '퇴직연금계좌',
-        '43103581': '해외주식계좌'
+        '43103581': '해외주식계좌',
+        'ISA': 'ISA',
+        'GOLD': '금계좌'
     }
     account_summary['account_name'] = account_summary['account_id'].map(account_names).fillna('기타계좌')
     

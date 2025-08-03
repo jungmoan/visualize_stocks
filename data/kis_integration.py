@@ -194,15 +194,44 @@ class KISIntegration:
 
         return current_data1, current_data2, current_data3
 
+    def _gold_inquire_balance(self) -> pd.DataFrame:
+
+        df1 = pd.DataFrame()
+        df1["prdt_name"] = ["KRX 금현물"]
+        df1["pdno"] = ["M04020000"]
+        df1["hldg_qty"] = [22]
+        df1["pchs_avg_pric"] = [int(3257430/22)]
+        df1["CANO"] = ["GOLD"]
+
+        df2 = pd.DataFrame()
+        df2["dnca_tot_amt"] = [1341218]
+        df2["CANO"] = ["GOLD"]
+        return df1, df2
+    
+    def _ISA_inquire_balance(self) -> Tuple[pd.DataFrame, pd.DataFrame]:
+
+        df1 = pd.DataFrame()
+        df1["prdt_name"] = ["TIGER 미국나스닥100"]
+        df1["pdno"] = ["133690"]
+        df1["hldg_qty"] = [101]
+        df1["pchs_avg_pric"] = [118144]
+        df1["CANO"] = ["ISA"]
+
+        df2 = pd.DataFrame()
+        df2["dnca_tot_amt"] = [86297]
+        df2["CANO"] = ["ISA"]
+
+        return df1, df2
+
     def get_balance(self, jsondump = False) -> dict:
 
         pension_stock, pension_deposit = self._pension_inquire_balance()
         normal_stock, normal_usd_deposit, normal_krw_deposit = self._normal_inquire_balance_oversea()
-
+        ISA_stock, ISA_deposit = self._ISA_inquire_balance()
 
         ret = {}
 
-
+        # 퇴직연금 잔고 정보 처리
         pension_stock_list = []
         for _, row in pension_stock.iterrows():
             stock_info = {
@@ -228,7 +257,59 @@ class KISIntegration:
             "deposit": pension_deposit_list
         }
 
+        # ISA 잔고 정보 처리
+        isa_stock_list = []
+        for _, row in ISA_stock.iterrows():
+            stock_info = {
+                "name": row["prdt_name"],
+                "ticker": row["pdno"],
+                "quantity": float(row["hldg_qty"]),
+                "avg_price": float(row["pchs_avg_pric"]),
+                "currency": "KRW"  # ISA는 원화로 가정
+            }
+            isa_stock_list.append(stock_info)
+        isa_deposit_list = []
+        i = {
+            "name": "ISA 예수금",
+            "ticker": "ISA_DEPOSIT",
+            "quantity": 1,  # 예수금은 수량 개념이 없으므로 1로 설정
+            "avg_price": float(ISA_deposit["dnca_tot_amt"].values[0]),
+            "currency": "KRW"  # 예수금은 원화로 가정
+        }
+        isa_deposit_list.append(i)
 
+        ret['ISA'] = {
+            "stock": isa_stock_list,
+            "deposit": isa_deposit_list
+        }
+
+        # 금 잔고 정보 처리
+        gold_stock, gold_deposit = self._gold_inquire_balance()
+        gold_stock_list = []
+        for _, row in gold_stock.iterrows():
+            stock_info = {
+                "name": row["prdt_name"],
+                "ticker": row["pdno"],
+                "quantity": float(row["hldg_qty"]),
+                "avg_price": float(row["pchs_avg_pric"]),
+                "currency": "KRW"  # 금은 원화로 가정
+            }
+            gold_stock_list.append(stock_info)
+        gold_deposit_list = []
+        g = {
+            "name": "금 예수금",
+            "ticker": "GOLD_DEPOSIT",
+            "quantity": 1,  # 예수금은 수량 개념이 없으므로 1로 설정
+            "avg_price": float(gold_deposit["dnca_tot_amt"].values[0]),
+            "currency": "KRW"  # 예수금은 원화로 가정
+        }
+        gold_deposit_list.append(g)
+        ret['GOLD'] = {
+            "stock": gold_stock_list,
+            "deposit": gold_deposit_list
+        }
+
+        # 해외주식 잔고 정보 처리
         normal_stock_list = []
         normal_deposit_list = []
         for _, row in normal_stock.iterrows():
@@ -273,10 +354,50 @@ class KISIntegration:
         # 예시로는 주식, ETF, 암호화폐 등의 데이터를 가져올 수 있습니다.
         pass
 
-    def get_stock_info(self, ticker):
-        # 특정 티커에 대한 주식 정보를 가져오는 메서드
-        return self.auth.get_stock_info(ticker)  # KISAuth 클래스의 메서드를 사용
+    def get_stock_info_domestic(self,
+        fid_input_iscd: str  # [필수] 입력 종목코드 (ex. 종목코드 (ex 005930 삼성전자), ETN은 종목코드 6자리 앞에 Q 입력 필수)
+    ) -> pd.DataFrame:
+        
+        env_dv = self.normal_auth.env_dv
+        API_URL = "/uapi/domestic-stock/v1/quotations/inquire-price"
+        fid_cond_mrkt_div_code = "UN"  # 통합 시장 코드
+
+        # 필수 파라미터 검증
+        if env_dv == "" or env_dv is None:
+            raise ValueError("env_dv is required (e.g. 'real:실전, demo:모의')")
+        
+        if fid_cond_mrkt_div_code == "" or fid_cond_mrkt_div_code is None:
+            raise ValueError("fid_cond_mrkt_div_code is required (e.g. 'J:KRX, NX:NXT, UN:통합')")
+        
+        if fid_input_iscd == "" or fid_input_iscd is None:
+            raise ValueError("fid_input_iscd is required (e.g. '종목코드 (ex 005930 삼성전자), ETN은 종목코드 6자리 앞에 Q 입력 필수')")
+
+        # tr_id 설정
+        if env_dv == "real":
+            tr_id = "FHKST01010100"
+        elif env_dv == "demo":
+            tr_id = "FHKST01010100"
+        else:
+            raise ValueError("env_dv can only be 'real' or 'demo'")
+
+        params = {
+            "FID_COND_MRKT_DIV_CODE": fid_cond_mrkt_div_code,
+            "FID_INPUT_ISCD": fid_input_iscd
+        }
+        
+        res = self.normal_auth._url_fetch(API_URL, tr_id, "", params)
+        
+        if res.isOK():
+            current_data = pd.DataFrame(res.getBody().output, index=[0])
+            return current_data
+        else:
+            res.printError(url=API_URL)
+            return pd.DataFrame() 
+        
     
+    def get_stock_info_oversea(self, ticker):
+        # 해외 주식 티커에 대한 정보를 가져오는 메서드
+        return self.normal_auth.get_stock_info(ticker)
 
 if __name__ == "__main__":
     
