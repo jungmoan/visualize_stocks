@@ -10,8 +10,10 @@ from data import fetcher
 import json
 import data.kis_integration as kis_integration
 import data.upbit_integration as upbit_integration
-# if not auth.render_authentication_ui():
-#     st.stop()
+import data.dc_integration as dc_integration
+
+if not auth.render_authentication_ui():
+    st.stop()
 # 자산 분류 설정 파일 경로
 ASSET_CLASSIFICATION_FILE = "private/asset_classification.csv"
 
@@ -57,6 +59,7 @@ def load_real_portfolio():
     try:
         kis = kis_integration.KISIntegration()
         upbit = upbit_integration.UpbitIntegration()
+        dc = dc_integration.DCIntegration()
         
         # KIS 계좌 데이터 가져오기
         balance = kis.get_balance()
@@ -69,6 +72,13 @@ def load_real_portfolio():
         # 두 계좌 데이터 합치기
         if upbit_balance:
             balance.update(upbit_balance)
+
+        # 현대차 계좌 데이터 가져오기
+        dc_balance = dc.get_balance()
+        print(dc_balance)
+        # 두 계좌 데이터 합치기
+        if dc_balance:
+            balance.update(dc_balance)
         
         # 디버깅용 저장
         with open("private/balance.json", "w", encoding="utf-8") as f:
@@ -87,7 +97,7 @@ def get_exchange_rate():
 
 # UI: 필터 및 환율 정보
 st.subheader("⚙️ 설정")
-col1, col2, col3 = st.columns([2, 2, 1])
+col1, col2, col3, col4 = st.columns([2, 2, 1, 1])
 with col1:
     display_currency = st.radio(
         "표시 통화", ["원화 (KRW)", "달러 (USD)"], horizontal=True
@@ -99,6 +109,24 @@ with col2:
 with col3:
     usd_krw_rate = get_exchange_rate()
     st.metric("현재 환율 (USD/KRW)", f"{usd_krw_rate:,.2f}")
+with col4:
+    # 금액 마스킹 토글
+    mask_amounts = st.toggle("🔒 금액 마스킹", value=False, help="금액을 *** 으로 표시합니다")
+
+# 금액 마스킹 함수
+def format_amount(amount, symbol, mask=False):
+    """금액을 마스킹 여부에 따라 포맷팅"""
+    if mask:
+        return f"{symbol}***,***"
+    else:
+        return f"{symbol}{amount:,.0f}"
+
+def format_percentage(percentage, mask=False):
+    """퍼센트를 마스킹 여부에 따라 포맷팅"""
+    if mask:
+        return "**.**%"
+    else:
+        return f"{percentage:.2f}%"
 
 # 데이터 처리 함수
 def process_portfolio_data(balance_data, asset_classification):
@@ -127,6 +155,14 @@ def process_portfolio_data(balance_data, asset_classification):
         # 예수금 데이터 처리 (KIS)
         if 'deposit' in account_data:
             for deposit in account_data['deposit']:
+                # 통화에 따라 자산 분류 결정
+                if deposit['currency'] == 'KRW':
+                    asset_type = 'KRW'
+                elif deposit['currency'] == 'USD':
+                    asset_type = 'USD'
+                else:
+                    asset_type = '현금'  # 기타 통화는 현금으로
+                
                 all_data.append({
                     'account_id': account_id,
                     'name': deposit['name'],
@@ -134,7 +170,7 @@ def process_portfolio_data(balance_data, asset_classification):
                     'quantity': deposit['quantity'],
                     'avg_price': deposit['avg_price'],
                     'currency': deposit['currency'],
-                    'asset_type': '현금',
+                    'asset_type': asset_type,
                     'original_type': '현금',
                     'total_purchase': deposit['quantity'] * deposit['avg_price']
                 })
@@ -142,8 +178,11 @@ def process_portfolio_data(balance_data, asset_classification):
         # 암호화폐 데이터 처리 (Upbit)
         if 'crypto' in account_data:
             for crypto in account_data['crypto']:
-                # 암호화폐는 기본적으로 '암호화폐' 분류, 사용자 정의 분류 적용 가능
-                custom_asset_type = asset_classification.get(crypto['ticker'], '암호화폐')
+                # KRW는 현금으로 분류, 나머지는 암호화폐로 분류
+                if crypto['ticker'] == 'KRW':
+                    custom_asset_type = 'KRW'
+                else:
+                    custom_asset_type = asset_classification.get(crypto['ticker'], '암호화폐')
                 
                 all_data.append({
                     'account_id': account_id,
@@ -153,7 +192,7 @@ def process_portfolio_data(balance_data, asset_classification):
                     'avg_price': crypto['avg_price'],
                     'currency': crypto['currency'],
                     'asset_type': custom_asset_type,
-                    'original_type': '암호화폐',  # 원래 타입 보존
+                    'original_type': '암호화폐' if crypto['ticker'] != 'KRW' else '현금',
                     'total_purchase': crypto['quantity'] * crypto['avg_price']
                 })
     
@@ -313,9 +352,11 @@ if not portfolio_df.empty:
     
     st.subheader(f"📈 포트폴리오 요약 ({target_symbol})")
     cols = st.columns(4)
-    cols[0].metric("총 매입금액", f"{target_symbol}{total_purchase:,.0f}")
-    cols[1].metric("총 평가금액", f"{target_symbol}{total_value:,.0f}")
-    cols[2].metric("총 손익", f"{target_symbol}{total_profit:,.0f}", f"{total_return_rate:.2f}%")
+    cols[0].metric("총 매입금액", format_amount(total_purchase, target_symbol, mask_amounts))
+    cols[1].metric("총 평가금액", format_amount(total_value, target_symbol, mask_amounts))
+    cols[2].metric("총 손익", 
+                   format_amount(total_profit, target_symbol, mask_amounts), 
+                   format_percentage(total_return_rate, mask_amounts))
     
     # 계좌별 요약
     account_summary = portfolio_df.groupby('account_id').agg({
@@ -331,7 +372,8 @@ if not portfolio_df.empty:
         '43103581': '해외주식계좌',
         'ISA': 'ISA',
         'GOLD': '금계좌',
-        'UPBIT': '업비트 계좌'
+        'UPBIT': '업비트 계좌',
+        'DC': 'DC 계좌'
     }
     account_summary['account_name'] = account_summary['account_id'].map(account_names).fillna('기타계좌')
     
@@ -345,58 +387,101 @@ if not portfolio_df.empty:
     # Treemap 시각화 (Finviz 스타일)
     st.write("##### 🗺️ 자산 Treemap (Finviz 스타일)")
     
+    # Treemap 표시 옵션 선택
+    treemap_view = st.radio(
+        "Treemap 표시 방식", 
+        ["자산 유형별", "계좌별"], 
+        horizontal=True,
+        help="자산 유형별 또는 계좌별로 Treemap을 표시할 수 있습니다"
+    )
+    
     # Treemap용 데이터 준비 (모든 자산 포함)
     treemap_data = portfolio_df.copy()
     
-    # 자산유형별 비중 계산 및 라벨 생성
-    total_portfolio_value = treemap_data['value_converted'].sum()
-    asset_type_summary = treemap_data.groupby('asset_type')['value_converted'].sum()
-    asset_type_percentages = (asset_type_summary / total_portfolio_value * 100).round(1)
-    
-    # 자산유형별 라벨에 비중 추가
-    treemap_data['asset_type_with_percent'] = treemap_data['asset_type'].map(
-        lambda x: f"{x} ({asset_type_percentages[x]:.1f}%)"
-    )
+    if treemap_view == "자산 유형별":
+        # 자산유형별 비중 계산 및 라벨 생성
+        total_portfolio_value = treemap_data['value_converted'].sum()
+        asset_type_summary = treemap_data.groupby('asset_type')['value_converted'].sum()
+        asset_type_percentages = (asset_type_summary / total_portfolio_value * 100).round(1)
+        
+        # 자산유형별 라벨에 비중 추가
+        treemap_data['group_with_percent'] = treemap_data['asset_type'].map(
+            lambda x: f"{x} ({asset_type_percentages[x]:.1f}%)"
+        )
+        treemap_path = [px.Constant("Portfolio"), 'group_with_percent', 'display_label']
+    else:  # 계좌별
+        # 계좌별 비중 계산 및 라벨 생성
+        total_portfolio_value = treemap_data['value_converted'].sum()
+        
+        # 계좌명 매핑 추가
+        treemap_data['account_name'] = treemap_data['account_id'].map(account_names).fillna('기타계좌')
+        
+        account_summary_treemap = treemap_data.groupby('account_name')['value_converted'].sum()
+        account_percentages = (account_summary_treemap / total_portfolio_value * 100).round(1)
+        
+        # 계좌별 라벨에 비중 추가
+        treemap_data['group_with_percent'] = treemap_data['account_name'].map(
+            lambda x: f"{x} ({account_percentages[x]:.1f}%)"
+        )
+        treemap_path = [px.Constant("Portfolio"), 'group_with_percent', 'display_label']
     
     if not treemap_data.empty:
         # 수익률에 따른 색상 설정 (현금은 0%로 설정)
         treemap_data['color_value'] = treemap_data['return_rate'].fillna(0)
+        
+        # 통화에 따라 표시명 결정 (KRW는 자산명, 그 외는 티커)
+        treemap_data['display_label'] = treemap_data.apply(
+            lambda row: row['name'] if row['currency'] == 'KRW' else row['ticker'], axis=1
+        )
+        
         treemap_data['display_name'] = treemap_data['ticker'] + '<br>' + treemap_data['name'].str[:10] + '...'
         treemap_data['hover_text'] = (
             treemap_data['ticker'] + ' (' + treemap_data['name'] + ')<br>' +
-            '평가금액: ' + target_symbol + treemap_data['value_converted'].apply(lambda x: f'{x:,.0f}') + '<br>' +
-            '수익률: ' + treemap_data['return_rate'].apply(lambda x: f'{x:.2f}%' if pd.notna(x) else '0.00%') + '<br>' +
-            '손익: ' + target_symbol + treemap_data['profit_loss'].apply(lambda x: f'{x:,.0f}')
+            '평가금액: ' + treemap_data['value_converted'].apply(lambda x: format_amount(x, target_symbol, mask_amounts)) + '<br>' +
+            '수익률: ' + treemap_data['return_rate'].apply(lambda x: format_percentage(x, mask_amounts) if pd.notna(x) else format_percentage(0, mask_amounts)) + '<br>' +
+            '손익: ' + treemap_data['profit_loss'].apply(lambda x: format_amount(x, target_symbol, mask_amounts))
         )
+        
+        # 전체 포트폴리오 대비 개별 자산 비중 계산
+        treemap_data['portfolio_percent'] = (treemap_data['value_converted'] / total_portfolio_value * 100).round(1)
+        
+        # Treemap에서 금액 표시도 마스킹 적용
+        if mask_amounts:
+            texttemplate = "<b>%{label}</b><br>***,***<br>%{text:.1f}%"
+        else:
+            texttemplate = "<b>%{label}</b><br>%{value:,.0f}<br>%{text:.1f}%"
         
         fig_treemap = px.treemap(
             treemap_data,
-            path=[px.Constant("Portfolio"), 'asset_type_with_percent', 'name'],
+            path=treemap_path,
             values='value_converted',
             color='color_value',
             color_continuous_scale='RdYlGn',
             color_continuous_midpoint=0,
-            title=f"자산 Treemap - 크기: 평가금액, 색상: 수익률 ({target_symbol})",
-            hover_name='name',
+            title=f"자산 Treemap ({treemap_view}) - 크기: 평가금액, 색상: 수익률 ({target_symbol})",
+            hover_name='display_label',
             hover_data={
                 'ticker': True,
+                'name': True,
                 'value_converted': ':,.0f',
                 'return_rate': ':.2f',
                 'profit_loss': ':,.0f',
+                'portfolio_percent': ':.1f',
                 'color_value': False
             }
         )
         
         fig_treemap.update_traces(
-            textinfo="label+value+percent parent",
-            texttemplate="<b>%{label}</b><br>%{value:,.0f}<br>%{percentParent}",
-            textfont_size=10,
+            textinfo="label+value+text",
+            texttemplate=texttemplate,
+            text=treemap_data['portfolio_percent'],
+            textfont_size=12,  # 고정 폰트 크기로 복원
             textposition="middle center"
         )
         
         fig_treemap.update_layout(
             height=600,
-            font_size=10,
+            font_size=12,  # 기본 폰트 크기
             coloraxis_colorbar=dict(
                 title="수익률 (%)",
                 tickformat=".1f",
@@ -448,22 +533,35 @@ if not portfolio_df.empty:
                 acc_return_rate = (acc_total_profit / acc_total_purchase) * 100 if acc_total_purchase > 0 else 0
                 
                 acc_cols = st.columns(4)
-                acc_cols[0].metric("매입금액", f"{target_symbol}{acc_total_purchase:,.0f}")
-                acc_cols[1].metric("평가금액", f"{target_symbol}{acc_total_value:,.0f}")
-                acc_cols[2].metric("손익", f"{target_symbol}{acc_total_profit:,.0f}", f"{acc_return_rate:.2f}%")
+                acc_cols[0].metric("매입금액", format_amount(acc_total_purchase, target_symbol, mask_amounts))
+                acc_cols[1].metric("평가금액", format_amount(acc_total_value, target_symbol, mask_amounts))
+                acc_cols[2].metric("손익", 
+                                 format_amount(acc_total_profit, target_symbol, mask_amounts), 
+                                 format_percentage(acc_return_rate, mask_amounts))
                 acc_cols[3].metric("보유 종목", f"{len(account_data)}개")
                 
                 # 상세 테이블
                 display_cols = ['name', 'ticker', 'asset_type', 'quantity', 'purchase_converted', 'value_converted', 'profit_loss', 'return_rate']
-                styled_df = account_data[display_cols].style.format({
-                    'quantity': '{:,.4f}',
-                    'purchase_converted': target_symbol + '{:,.0f}',
-                    'value_converted': target_symbol + '{:,.0f}',
-                    'profit_loss': target_symbol + '{:,.0f}',
-                    'return_rate': '{:.2f}%'
-                }).background_gradient(cmap='RdYlGn', subset=['return_rate'], vmin=-20, vmax=20)
                 
-                st.dataframe(styled_df, use_container_width=True, hide_index=True)
+                if mask_amounts:
+                    # 마스킹된 테이블
+                    masked_data = account_data[display_cols].copy()
+                    masked_data['purchase_converted'] = '***,***'
+                    masked_data['value_converted'] = '***,***'
+                    masked_data['profit_loss'] = '***,***'
+                    masked_data['return_rate'] = '**.**%'
+                    st.dataframe(masked_data, use_container_width=True, hide_index=True)
+                else:
+                    # 일반 테이블
+                    styled_df = account_data[display_cols].style.format({
+                        'quantity': '{:,.4f}',
+                        'purchase_converted': target_symbol + '{:,.0f}',
+                        'value_converted': target_symbol + '{:,.0f}',
+                        'profit_loss': target_symbol + '{:,.0f}',
+                        'return_rate': '{:.2f}%'
+                    }).background_gradient(cmap='RdYlGn', subset=['return_rate'], vmin=-20, vmax=20)
+                    
+                    st.dataframe(styled_df, use_container_width=True, hide_index=True)
     
     st.divider()
     
@@ -485,15 +583,26 @@ if not portfolio_df.empty:
     portfolio_sorted['account_name'] = portfolio_sorted['account_id'].map(account_names).fillna('기타계좌')
     
     display_cols = ['account_name', 'name', 'ticker', 'asset_type', 'quantity', 'purchase_converted', 'value_converted', 'profit_loss', 'return_rate']
-    styled_df = portfolio_sorted[display_cols].style.format({
-        'quantity': '{:,.4f}',
-        'purchase_converted': target_symbol + '{:,.0f}',
-        'value_converted': target_symbol + '{:,.0f}',
-        'profit_loss': target_symbol + '{:,.0f}',
-        'return_rate': '{:.2f}%'
-    }).background_gradient(cmap='RdYlGn', subset=['return_rate'], vmin=-20, vmax=20)
     
-    st.dataframe(styled_df, use_container_width=True, hide_index=True)
+    if mask_amounts:
+        # 마스킹된 전체 테이블
+        masked_data = portfolio_sorted[display_cols].copy()
+        masked_data['purchase_converted'] = '***,***'
+        masked_data['value_converted'] = '***,***'
+        masked_data['profit_loss'] = '***,***'
+        masked_data['return_rate'] = '**.**%'
+        st.dataframe(masked_data, use_container_width=True, hide_index=True)
+    else:
+        # 일반 전체 테이블
+        styled_df = portfolio_sorted[display_cols].style.format({
+            'quantity': '{:,.4f}',
+            'purchase_converted': target_symbol + '{:,.0f}',
+            'value_converted': target_symbol + '{:,.0f}',
+            'profit_loss': target_symbol + '{:,.0f}',
+            'return_rate': '{:.2f}%'
+        }).background_gradient(cmap='RdYlGn', subset=['return_rate'], vmin=-20, vmax=20)
+        
+        st.dataframe(styled_df, use_container_width=True, hide_index=True)
 
 else:
     st.warning("포트폴리오 데이터가 없습니다.")
