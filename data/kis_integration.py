@@ -194,28 +194,14 @@ class KISIntegration:
 
         return current_data1, current_data2, current_data3
 
-    def get_balance(self):
+    def get_balance(self, jsondump = False) -> dict:
 
         pension_stock, pension_deposit = self._pension_inquire_balance()
         normal_stock, normal_usd_deposit, normal_krw_deposit = self._normal_inquire_balance_oversea()
 
-        # print(pension_stock)
-        # print("--------")
-        # print(pension_deposit)
-        # print("--------")
 
         ret = {}
 
-        # ret[f'{self.pension_auth.getTREnv().my_acct}'] = {
-        #     "stock": pension_stock,
-        #     "deposit": pension_deposit
-        # }
-
-        # 종목이름, 티커, 수량, 평균매입가
-
-        '''
-        {"acno": "1234567890", "stock" : [{"name": "삼성전자", "ticker": "005930", "quantity": 10, "avg_price": 50000}, ...]}
-        '''
 
         pension_stock_list = []
         for _, row in pension_stock.iterrows():
@@ -255,7 +241,6 @@ class KISIntegration:
             }
             normal_stock_list.append(stock_info)
 
-        print(normal_krw_deposit)
         n1 = {
             "name": "해외주식 예수금",
             "ticker": "OVERSEA_DEPOSIT",
@@ -278,16 +263,11 @@ class KISIntegration:
             "deposit": normal_deposit_list
         }
 
-
-        with open("balance.json", "w", encoding="utf-8") as f:
+        with open("private/balance.json", "w", encoding="utf-8") as f:
             json.dump(ret, f, ensure_ascii=False, indent=2)
 
-        print(ret)
-        # print(ret)
-        # print(pension_stock, pension_deposit)
-        # print(normal_stock, usd_deposit, krw_deposit)
-
-        return None
+        return ret
+    
     def get_market_data(self, market_type):
         # 여기에 KIS API를 호출하여 시장 데이터를 가져오는 로직을 추가합니다.
         # 예시로는 주식, ETF, 암호화폐 등의 데이터를 가져올 수 있습니다.
@@ -299,20 +279,8 @@ class KISIntegration:
     
 
 if __name__ == "__main__":
-    # 예시로 KISIntegration 클래스를 사용하여 인증을 수행합니다.
-    # 실제로는 이 클래스를 다른 모듈에서 임포트하여 사용할 것입니다.
+    
     inte = KISIntegration()
     
     balance = inte.get_balance()
-
-    # df1, df2 = inte.pension_inquire_balance()
-    # df1, df2, df3 = inte.normal_inquire_balance_oversea()
-    # # 컬럼명 한글로 변경
-    # df1 = df1.rename(columns=indexMapping)
-    # df2 = df2.rename(columns=indexMapping)
-    # df3 = df3.rename(columns=indexMapping)
-
-    # # 데이터프레임 저장
-    # df1.to_csv("normal_oversea_balance1.csv", index=False)
-    # df2.to_csv("normal_oversea_balance2.csv", index=False)
-    # df3.to_csv("normal_oversea_balance3.csv", index=False)
+    print(balance)

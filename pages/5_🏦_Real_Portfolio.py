@@ -128,10 +128,12 @@ def get_current_prices_for_portfolio(tickers):
     
     prices = {}
     
-    if kr_tickers:
-        kr_prices = fetcher.get_current_prices(kr_tickers)
-        prices.update(kr_prices.to_dict())
-    
+    new_kr_tickers = [t+".KS" for t in kr_tickers if len(t) == 6]
+    if new_kr_tickers:
+        kr_prices = fetcher.get_current_prices(new_kr_tickers)
+        kr_prices = kr_prices.to_dict()
+        kr_prices = {k[:-3] if k.endswith('.KS') else k: v for k, v in kr_prices.items()}
+        prices.update(kr_prices)
     if us_tickers:
         us_prices = fetcher.get_current_prices(us_tickers)
         prices.update(us_prices.to_dict())
@@ -161,7 +163,7 @@ with st.expander("🏷️ 자산 분류 설정"):
         st.write("##### 보유 종목 분류 설정")
         
         # 자산 유형 옵션
-        asset_type_options = ['주식', 'ETF', '채권', 'REITs', '원자재', '기타']
+        asset_type_options = ['주식', 'ETF', '채권', 'REITs', '원자재', '기타', "USD", "KRW"]
         
         # 각 종목별 분류 설정
         classification_changes = {}
@@ -215,6 +217,7 @@ if not portfolio_df.empty:
     stock_tickers = portfolio_df[portfolio_df['original_type'] == '주식']['ticker'].unique().tolist()
     current_prices = get_current_prices_for_portfolio(stock_tickers)
     
+    print(current_prices)
     # 현재가 매핑 (예수금은 매입가와 동일)
     portfolio_df['current_price'] = portfolio_df.apply(
         lambda row: current_prices.get(row['ticker'], row['avg_price']) 
