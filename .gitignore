@@ -30,3 +30,4 @@ config.yaml
 *.p12
 *.jks
 *.srl
+*.yaml
