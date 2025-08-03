@@ -194,7 +194,7 @@ class KISIntegration:
 
         return current_data1, current_data2, current_data3
 
-    def _gold_inquire_balance(self) -> pd.DataFrame:
+    def _gold_inquire_balance(self) -> pd.DataFrame: # TODO: HARDCODED FOR GOLD
 
         df1 = pd.DataFrame()
         df1["prdt_name"] = ["KRX 금현물"]
@@ -208,7 +208,7 @@ class KISIntegration:
         df2["CANO"] = ["GOLD"]
         return df1, df2
     
-    def _ISA_inquire_balance(self) -> Tuple[pd.DataFrame, pd.DataFrame]:
+    def _ISA_inquire_balance(self) -> Tuple[pd.DataFrame, pd.DataFrame]: # TODO: HARDCODED FOR ISA
 
         df1 = pd.DataFrame()
         df1["prdt_name"] = ["TIGER 미국나스닥100"]
