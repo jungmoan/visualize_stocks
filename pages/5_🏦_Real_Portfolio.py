@@ -7,6 +7,39 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from data import fetcher
 import data.kis_integration as kis_integration
 
+# 자산 분류 설정 파일 경로
+ASSET_CLASSIFICATION_FILE = "private/asset_classification.csv"
+
+# 기본 자산 분류 정의
+DEFAULT_ASSET_TYPES = {
+    'IEF': '채권',
+    'SGOV': '채권', 
+    'SHV': '채권',
+    'BIL': '채권',
+    'QQQ': 'ETF',
+    'QQQM': 'ETF',
+    'SCHD': 'ETF',
+    '360750': 'ETF',  # TIGER 미국S&P500
+    '379800': 'ETF',  # KODEX 미국S&P500
+    '472170': 'ETF',  # TIGER 미국테크TOP10채권혼합
+}
+
+# 자산 분류 데이터 로딩/저장 함수
+@st.cache_data(ttl=60)
+def load_asset_classification():
+    """자산 분류 설정 로딩"""
+    if os.path.exists(ASSET_CLASSIFICATION_FILE):
+        df = pd.read_csv(ASSET_CLASSIFICATION_FILE)
+        return dict(zip(df['ticker'], df['asset_type']))
+    else:
+        return DEFAULT_ASSET_TYPES.copy()
+
+def save_asset_classification(classification_dict):
+    """자산 분류 설정 저장"""
+    df = pd.DataFrame(list(classification_dict.items()), columns=['ticker', 'asset_type'])
+    df.to_csv(ASSET_CLASSIFICATION_FILE, index=False)
+    st.cache_data.clear()  # 캐시 클리어
+
 st.set_page_config(layout="wide", page_title="실제 포트폴리오")
 
 st.title("🏦 실제 포트폴리오")
@@ -45,16 +78,8 @@ with col3:
     usd_krw_rate = get_exchange_rate()
     st.metric("현재 환율 (USD/KRW)", f"{usd_krw_rate:,.2f}")
 
-st.divider()
-
-# 포트폴리오 데이터 로딩
-balance = load_real_portfolio()
-if balance is None:
-    st.error("포트폴리오 데이터를 불러올 수 없습니다.")
-    st.stop()
-
 # 데이터 처리 함수
-def process_portfolio_data(balance_data):
+def process_portfolio_data(balance_data, asset_classification):
     """KIS API 데이터를 DataFrame으로 변환"""
     all_data = []
     
@@ -62,6 +87,9 @@ def process_portfolio_data(balance_data):
         # 주식 데이터 처리
         if 'stock' in account_data:
             for stock in account_data['stock']:
+                # 사용자 정의 자산 분류 적용
+                custom_asset_type = asset_classification.get(stock['ticker'], '주식')
+                
                 all_data.append({
                     'account_id': account_id,
                     'name': stock['name'],
@@ -69,7 +97,8 @@ def process_portfolio_data(balance_data):
                     'quantity': stock['quantity'],
                     'avg_price': stock['avg_price'],
                     'currency': stock['currency'],
-                    'asset_type': '주식',
+                    'asset_type': custom_asset_type,
+                    'original_type': '주식',  # 원래 타입 보존
                     'total_purchase': stock['quantity'] * stock['avg_price']
                 })
         
@@ -84,6 +113,7 @@ def process_portfolio_data(balance_data):
                     'avg_price': deposit['avg_price'],
                     'currency': deposit['currency'],
                     'asset_type': '현금',
+                    'original_type': '현금',
                     'total_purchase': deposit['quantity'] * deposit['avg_price']
                 })
     
@@ -108,18 +138,87 @@ def get_current_prices_for_portfolio(tickers):
     
     return prices
 
+st.divider()
+
+# 포트폴리오 데이터 로딩
+balance = load_real_portfolio()
+if balance is None:
+    st.error("포트폴리오 데이터를 불러올 수 없습니다.")
+    st.stop()
+
+# 자산 분류 설정
+with st.expander("🏷️ 자산 분류 설정"):
+    st.write("보유 종목의 자산 유형을 설정할 수 있습니다.")
+    
+    # 현재 자산 분류 로딩
+    current_classification = load_asset_classification()
+    
+    # 포트폴리오에서 주식 종목만 추출
+    temp_df = process_portfolio_data(balance, {})
+    stock_tickers = temp_df[temp_df['original_type'] == '주식']['ticker'].unique().tolist()
+    
+    if stock_tickers:
+        st.write("##### 보유 종목 분류 설정")
+        
+        # 자산 유형 옵션
+        asset_type_options = ['주식', 'ETF', '채권', 'REITs', '원자재', '기타']
+        
+        # 각 종목별 분류 설정
+        classification_changes = {}
+        cols_per_row = 3
+        
+        for i in range(0, len(stock_tickers), cols_per_row):
+            cols = st.columns(cols_per_row)
+            for j, ticker in enumerate(stock_tickers[i:i+cols_per_row]):
+                with cols[j]:
+                    # 종목명 표시
+                    stock_name = temp_df[temp_df['ticker'] == ticker]['name'].iloc[0]
+                    st.write(f"**{ticker}**")
+                    st.caption(f"{stock_name}")
+                    
+                    current_type = current_classification.get(ticker, '주식')
+                    new_type = st.selectbox(
+                        "자산 유형",
+                        options=asset_type_options,
+                        index=asset_type_options.index(current_type) if current_type in asset_type_options else 0,
+                        key=f"asset_type_{ticker}"
+                    )
+                    classification_changes[ticker] = new_type
+        
+        # 저장 버튼
+        col1, col2 = st.columns([1, 4])
+        with col1:
+            if st.button("💾 분류 저장", use_container_width=True):
+                # 기존 분류와 새로운 분류 합치기
+                updated_classification = current_classification.copy()
+                updated_classification.update(classification_changes)
+                save_asset_classification(updated_classification)
+                st.success("자산 분류가 저장되었습니다!")
+                st.rerun()
+        
+        with col2:
+            if st.button("🔄 기본값으로 초기화", use_container_width=True):
+                save_asset_classification(DEFAULT_ASSET_TYPES.copy())
+                st.success("기본 분류로 초기화되었습니다!")
+                st.rerun()
+    else:
+        st.info("분류할 수 있는 주식 종목이 없습니다.")
+
+# 최종 자산 분류 적용하여 데이터 처리
+
 # 데이터 처리
-portfolio_df = process_portfolio_data(balance)
+final_classification = load_asset_classification()
+portfolio_df = process_portfolio_data(balance, final_classification)
 
 if not portfolio_df.empty:
-    # 현재가 조회
-    stock_tickers = portfolio_df[portfolio_df['asset_type'] == '주식']['ticker'].unique().tolist()
+    # 현재가 조회 (원래 타입이 주식인 것만)
+    stock_tickers = portfolio_df[portfolio_df['original_type'] == '주식']['ticker'].unique().tolist()
     current_prices = get_current_prices_for_portfolio(stock_tickers)
     
     # 현재가 매핑 (예수금은 매입가와 동일)
     portfolio_df['current_price'] = portfolio_df.apply(
         lambda row: current_prices.get(row['ticker'], row['avg_price']) 
-        if row['asset_type'] == '주식' else row['avg_price'], axis=1
+        if row['original_type'] == '주식' else row['avg_price'], axis=1
     )
     
     portfolio_df['current_value'] = portfolio_df['quantity'] * portfolio_df['current_price']
