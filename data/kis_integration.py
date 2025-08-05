@@ -98,24 +98,77 @@ indexMapping = {
 
 class KISIntegration:
     def __init__(self):
-        self.pension_auth = KISAuth("/home/jungmo/apps/visualize_stocks/private/pension_devlp.yaml")
+        self.pension_auth = KISAuth("/home/jungmo/apps/visualize_stocks/private/pension_devlp.yaml") # 개인연금
         self.pension_auth.auth()
-        self.normal_auth = KISAuth("/home/jungmo/apps/visualize_stocks/private/kis_devlp.yaml")
+
+
+        self.normal_auth = KISAuth("/home/jungmo/apps/visualize_stocks/private/kis_devlp.yaml") # 일반계좌
         self.normal_auth.auth()  # 인증 수행
-        self.personal_pension_auth = KISAuth("/home/jungmo/apps/visualize_stocks/private/personal_pension_devlp.yaml")
-        self.personal_pension_auth.auth()  # 인증 수행
-
-        pension_trenv = self.pension_auth.getTREnv()
-        self.pension_acct = pension_trenv.my_acct
-        self.pension_prod = pension_trenv.my_prod
-        
 
 
-    def _pension_inquire_balance(self) -> Tuple[pd.DataFrame, pd.DataFrame]:
+        self.IRP_auth = KISAuth("/home/jungmo/apps/visualize_stocks/private/personal_pension_devlp.yaml") # 퇴직연금
+        self.IRP_auth.auth()  # 인증 수행
+
+
+    def _pension_inquire_balance(
+        self,
+    ) -> Tuple[pd.DataFrame, pd.DataFrame]:
+        API_URL = "/uapi/domestic-stock/v1/trading/inquire-balance"
+
+        env_dv = self.pension_auth.env_dv
+        cano = self.pension_auth.getTREnv().my_acct
+        acnt_prdt_cd = self.pension_auth.getTREnv().my_prod
+
+        print("pension Account:", cano, acnt_prdt_cd)
+        afhr_flpr_yn = "Y"
+        inqr_dvsn = "02"
+        unpr_dvsn = "01"
+        fund_sttl_icld_yn = "N"
+        fncg_amt_auto_rdpt_yn = "N"
+        prcs_dvsn = "00"
+        FK100 = ""
+        NK100 = ""
+        tr_cont = ""
+        # tr_id 설정
+        if env_dv == "real":
+            tr_id = "TTTC8434R"
+        elif env_dv == "demo":
+            tr_id = "VTTC8434R"
+        else:
+            raise ValueError("env_dv is required (e.g. 'real' or 'demo')")
+
+        params = {
+            "CANO": cano,
+            "ACNT_PRDT_CD": acnt_prdt_cd,
+            "AFHR_FLPR_YN": afhr_flpr_yn,
+            "OFL_YN": "",
+            "INQR_DVSN": inqr_dvsn,
+            "UNPR_DVSN": unpr_dvsn,
+            "FUND_STTL_ICLD_YN": fund_sttl_icld_yn,
+            "FNCG_AMT_AUTO_RDPT_YN": fncg_amt_auto_rdpt_yn,
+            "PRCS_DVSN": prcs_dvsn,
+            "CTX_AREA_FK100": FK100,
+            "CTX_AREA_NK100": NK100
+        }
+
+        res = self.pension_auth._url_fetch(API_URL, tr_id, tr_cont, params)
+        print(res.getBody())
+        if res.isOK():
+            # output1 처리
+            current_data1 = pd.DataFrame(res.getBody().output1)
+            current_data2 = pd.DataFrame(res.getBody().output2)
+
+            return current_data1, current_data2
+        else:
+            return pd.DataFrame(), pd.DataFrame()
+    
+    # 퇴직연금!!
+    def _IRP_inquire_balance(self) -> Tuple[pd.DataFrame, pd.DataFrame]:
         API_URL = "/uapi/domestic-stock/v1/trading/pension/inquire-balance"
 
-        cano = self.pension_acct
-        acnt_prdt_cd = self.pension_prod
+        cano = self.IRP_auth.getTREnv().my_acct
+        acnt_prdt_cd = self.IRP_auth.getTREnv().my_prod
+        print("IRP Account:", cano, acnt_prdt_cd)
         acca_dvsn_cd = "00"
         inqr_dvsn = "00"
         FK100 = ""
@@ -132,17 +185,56 @@ class KISIntegration:
             "CTX_AREA_NK100": NK100            # 연속조회키100
         }
         
-        res = self.pension_auth._url_fetch(API_URL, tr_id, tr_cont, params)
+        res = self.IRP_auth._url_fetch(API_URL, tr_id, tr_cont, params)
         current_data1 = pd.DataFrame(res.getBody().output1)
         current_data2 = pd.DataFrame(res.getBody().output2, index=[0])
 
         current_data1 = current_data1[["prdt_name", "pdno", "hldg_qty", "pchs_avg_pric"]]
-        current_data2 = current_data2[["dnca_tot_amt"]]
+        current_data2 = current_data2[["prvs_rcdl_excc_amt"]]
         
         current_data1["CANO"] = cano
         current_data2["CANO"] = cano
 
         return current_data1, current_data2
+    
+    # def _pension_inquire_balance(self) -> Tuple[pd.DataFrame, pd.DataFrame]:
+    #     API_URL = "/uapi/domestic-stock/v1/trading/pension/inquire-balance"
+
+    #     cano = self.pension_auth.getTREnv().my_acct
+    #     acnt_prdt_cd = self.pension_auth.getTREnv().my_prod
+    #     print("pension Account:", cano, acnt_prdt_cd)
+    #     acca_dvsn_cd = "00"
+    #     inqr_dvsn = "00"
+    #     FK100 = ""
+    #     NK100 = ""
+    #     tr_cont = ""
+    #     tr_id = "TTTC2208R"  # 퇴직연금 잔고조회
+
+    #     params = {
+    #         "CANO": cano,                       # 종합계좌번호
+    #         "ACNT_PRDT_CD": acnt_prdt_cd,      # 계좌상품코드
+    #         "ACCA_DVSN_CD": acca_dvsn_cd,      # 적립금구분코드
+    #         "INQR_DVSN": inqr_dvsn,            # 조회구분
+    #         "CTX_AREA_FK100": FK100,           # 연속조회검색조건100
+    #         "CTX_AREA_NK100": NK100            # 연속조회키100
+    #     }
+        
+    #     res = self.pension_auth._url_fetch(API_URL, tr_id, tr_cont, params)
+    #     if not res.isOK():
+    #         print(f"퇴직연금 잔고 조회 실패: {res.getBody()}")
+    #         return pd.DataFrame(), pd.DataFrame()
+    #     current_data1 = pd.DataFrame(res.getBody().output1)
+    #     current_data2 = pd.DataFrame(res.getBody().output2, index=[0])
+
+    #     print(current_data1, res.isOK())
+
+    #     current_data1 = current_data1[["prdt_name", "pdno", "hldg_qty", "pchs_avg_pric"]]
+    #     current_data2 = current_data2[["dnca_tot_amt"]]
+        
+    #     current_data1["CANO"] = cano
+    #     current_data2["CANO"] = cano
+
+    #     return current_data1, current_data2
     
     def _normal_inquire_balance_oversea(self) -> Tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
         API_URL = "/uapi/overseas-stock/v1/trading/inquire-present-balance"
@@ -183,9 +275,13 @@ class KISIntegration:
         else:
             return pd.DataFrame(), pd.DataFrame(), pd.DataFrame()
 
+        # current_data1.to_csv("current_data1.csv", index=False, encoding="utf-8-sig")
+        current_data2.to_csv("current_data2.csv", index=False, encoding="utf-8-sig")
+        current_data3.to_csv("current_data3.csv", index=False, encoding="utf-8-sig")
         # 필요한 컬럼만 추출
-        current_data1 = current_data1[["prdt_name","pdno", "cblc_qty13", "avg_unpr3"]]
-        current_data2 = current_data2[["frcr_dncl_amt_2"]]
+        print(current_data3, "Aaaaa")
+        current_data1 = current_data1[["prdt_name","pdno", "ccld_qty_smtl1", "avg_unpr3"]]
+        current_data2 = current_data2[["nxdy_frcr_drwg_psbl_amt"]]
         current_data3 = current_data3[["ustl_sll_amt_smtl","tot_dncl_amt"]]
 
         current_data1["CANO"] = cano
@@ -204,7 +300,7 @@ class KISIntegration:
         df1["CANO"] = ["GOLD"]
 
         df2 = pd.DataFrame()
-        df2["dnca_tot_amt"] = [1341218]
+        df2["prvs_rcdl_excc_amt"] = [1341218]
         df2["CANO"] = ["GOLD"]
         return df1, df2
     
@@ -218,7 +314,7 @@ class KISIntegration:
         df1["CANO"] = ["ISA"]
 
         df2 = pd.DataFrame()
-        df2["dnca_tot_amt"] = [86297]
+        df2["prvs_rcdl_excc_amt"] = [86297]
         df2["CANO"] = ["ISA"]
 
         return df1, df2
@@ -226,10 +322,12 @@ class KISIntegration:
     def get_balance(self, jsondump = False) -> dict:
 
         pension_stock, pension_deposit = self._pension_inquire_balance()
+        irp_stock, irp_deposit = self._IRP_inquire_balance()
         normal_stock, normal_usd_deposit, normal_krw_deposit = self._normal_inquire_balance_oversea()
         ISA_stock, ISA_deposit = self._ISA_inquire_balance()
 
         ret = {}
+
 
         # 퇴직연금 잔고 정보 처리
         pension_stock_list = []
@@ -239,16 +337,16 @@ class KISIntegration:
                 "ticker": row["pdno"],
                 "quantity": float(row["hldg_qty"]),
                 "avg_price": float(row["pchs_avg_pric"]),
-                "currency": "KRW"  # 퇴직연금은 원화로 가정
+                "currency": "KRW"  # 개인연금은 원화로 가정
             }
             pension_stock_list.append(stock_info)
 
         pension_deposit_list = []
         p = {
-            "name": "퇴직연금 예수금",
+            "name": "개인연금 예수금",
             "ticker": "PENSION_DEPOSIT",
             "quantity": 1,  # 예수금은 수량 개념이 없으므로 1로 설정
-            "avg_price": float(pension_deposit["dnca_tot_amt"].values[0]),
+            "avg_price": float(pension_deposit["prvs_rcdl_excc_amt"].values[0]),
             "currency": "KRW"  # 예수금은 원화로 가정
         }
         pension_deposit_list.append(p)
@@ -256,6 +354,60 @@ class KISIntegration:
             "stock": pension_stock_list,
             "deposit": pension_deposit_list
         }
+
+
+        # 퇴직연금 잔고 정보 처리
+        irp_stock_list = []
+        for _, row in irp_stock.iterrows():
+            stock_info = {
+                "name": row["prdt_name"],
+                "ticker": row["pdno"],
+                "quantity": float(row["hldg_qty"]),
+                "avg_price": float(row["pchs_avg_pric"]),
+                "currency": "KRW"  # 개인연금은 원화로 가정
+            }
+            irp_stock_list.append(stock_info)
+
+        irp_deposit_list = []
+        p = {
+            "name": "퇴직연금 예수금",
+            "ticker": "IRP_DEPOSIT",
+            "quantity": 1,  # 예수금은 수량 개념이 없으므로 1로 설정
+            "avg_price": float(irp_deposit["prvs_rcdl_excc_amt"].values[0]),
+            "currency": "KRW"  # 예수금은 원화로 가정
+        }
+        irp_deposit_list.append(p)
+        ret[f'{self.IRP_auth.getTREnv().my_acct}'] = {
+            "stock": irp_stock_list,
+            "deposit": irp_deposit_list
+        }
+
+
+        # # 퇴직연금 잔고 정보 처리
+        # pension_stock_list = []
+        # for _, row in pension_stock.iterrows():
+        #     stock_info = {
+        #         "name": row["prdt_name"],
+        #         "ticker": row["pdno"],
+        #         "quantity": float(row["hldg_qty"]),
+        #         "avg_price": float(row["pchs_avg_pric"]),
+        #         "currency": "KRW"  # 퇴직연금은 원화로 가정
+        #     }
+        #     pension_stock_list.append(stock_info)
+
+        # pension_deposit_list = []
+        # p = {
+        #     "name": "퇴직연금 예수금",
+        #     "ticker": "PENSION_DEPOSIT",
+        #     "quantity": 1,  # 예수금은 수량 개념이 없으므로 1로 설정
+        #     "avg_price": float(pension_deposit["dnca_tot_amt"].values[0]),
+        #     "currency": "KRW"  # 예수금은 원화로 가정
+        # }
+        # pension_deposit_list.append(p)
+        # ret[f'{self.pension_auth.getTREnv().my_acct}'] = {
+        #     "stock": pension_stock_list,
+        #     "deposit": pension_deposit_list
+        # }
 
         # ISA 잔고 정보 처리
         isa_stock_list = []
@@ -273,7 +425,7 @@ class KISIntegration:
             "name": "ISA 예수금",
             "ticker": "ISA_DEPOSIT",
             "quantity": 1,  # 예수금은 수량 개념이 없으므로 1로 설정
-            "avg_price": float(ISA_deposit["dnca_tot_amt"].values[0]),
+            "avg_price": float(ISA_deposit["prvs_rcdl_excc_amt"].values[0]),
             "currency": "KRW"  # 예수금은 원화로 가정
         }
         isa_deposit_list.append(i)
@@ -300,7 +452,7 @@ class KISIntegration:
             "name": "금 예수금",
             "ticker": "GOLD_DEPOSIT",
             "quantity": 1,  # 예수금은 수량 개념이 없으므로 1로 설정
-            "avg_price": float(gold_deposit["dnca_tot_amt"].values[0]),
+            "avg_price": float(gold_deposit["prvs_rcdl_excc_amt"].values[0]),
             "currency": "KRW"  # 예수금은 원화로 가정
         }
         gold_deposit_list.append(g)
@@ -316,7 +468,7 @@ class KISIntegration:
             stock_info = {
                 "name": row["prdt_name"],
                 "ticker": row["pdno"],
-                "quantity": float(row["cblc_qty13"]),
+                "quantity": float(row["ccld_qty_smtl1"]),
                 "avg_price": float(row["avg_unpr3"]),
                 "currency": "USD"  # 해외 주식은 달러로 가정
             }
@@ -326,7 +478,7 @@ class KISIntegration:
             "name": "해외주식 예수금",
             "ticker": "OVERSEA_DEPOSIT",
             "quantity": 1,  # 예수금은 수량 개념이 없으므로 1로 설정
-            "avg_price": float(normal_usd_deposit["frcr_dncl_amt_2"].values[0]),
+            "avg_price": float(normal_usd_deposit["nxdy_frcr_drwg_psbl_amt"].values[0]),
             "currency": "USD"  # 예수금은 달러로 가정
         }
         normal_deposit_list.append(n1)

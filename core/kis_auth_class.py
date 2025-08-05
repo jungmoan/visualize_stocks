@@ -184,6 +184,7 @@ class KISAuth:
         # if product is None:
         product = self._cfg["my_prod"]
         
+        print(product)
         p = {
             "grant_type": "client_credentials",
         }

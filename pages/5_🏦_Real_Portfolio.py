@@ -12,8 +12,8 @@ import data.kis_integration as kis_integration
 import data.upbit_integration as upbit_integration
 import data.dc_integration as dc_integration
 
-if not auth.render_authentication_ui():
-    st.stop()
+# if not auth.render_authentication_ui():
+#     st.stop()
 # 자산 분류 설정 파일 경로
 ASSET_CLASSIFICATION_FILE = "private/asset_classification.csv"
 
@@ -368,6 +368,7 @@ if not portfolio_df.empty:
     
     # 계좌명 매핑
     account_names = {
+        '43147522': '개인연금계좌',
         '43143043': '퇴직연금계좌',
         '43103581': '해외주식계좌',
         'ISA': 'ISA',

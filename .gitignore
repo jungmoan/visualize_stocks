@@ -1,6 +1,5 @@
 generate_hashes.py
 __pycache__
-auth.py
 *pyc
 .venv
 private
