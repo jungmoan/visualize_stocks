@@ -1,0 +1,15 @@
+[Unit]
+Description=Portfolio Data Scheduler
+After=network.target
+
+[Service]
+Type=simple
+User=jungmo
+WorkingDirectory=/home/jungmo/apps/visualize_stocks
+ExecStart=/home/jungmo/apps/visualize_stocks/.venv/bin/python /home/jungmo/apps/visualize_stocks/portfolio_scheduler.py
+Restart=always
+RestartSec=30
+Environment=PYTHONPATH=/home/jungmo/apps/visualize_stocks
+
+[Install]
+WantedBy=multi-user.target

@@ -224,8 +224,8 @@ def get_current_prices_for_portfolio(tickers):
     
     # 금
     if gold_tickers:
-        gold_prices = fetcher.get_stock_info_from_KIS('M04020000')
-        prices['M04020000'] = float(gold_prices['stck_prpr'].iloc[0])
+        # gold_prices = fetcher.get_stock_info_from_KIS('M04020000')
+        prices['M04020000'] = 150000.0#float(gold_prices['stck_prpr'].iloc[0])
     
     # 암호화폐 (업비트 API 사용)
     if crypto_tickers:
@@ -380,6 +380,21 @@ if not portfolio_df.empty:
     
     cols[3].metric("보유 계좌 수", f"{len(account_summary)}개")
     
+    # DB 저장 버튼 (포트폴리오 데이터가 준비된 후)
+    if st.button("💾 DB에 저장", help="현재 포트폴리오 상태를 히스토리 DB에 저장합니다"):
+        try:
+            from db_manager import PortfolioDBManager
+            
+            db_manager = PortfolioDBManager()
+            success = db_manager.save_portfolio_snapshot(portfolio_df, usd_krw_rate)
+            if success:
+                st.success("✅ 포트폴리오가 DB에 저장되었습니다!")
+                st.info("💡 포트폴리오 히스토리 페이지에서 확인할 수 있습니다.")
+            else:
+                st.error("❌ DB 저장에 실패했습니다.")
+        except Exception as e:
+            st.error(f"DB 저장 오류: {e}")
+    
     st.divider()
     
     # 시각화
@@ -446,15 +461,20 @@ if not portfolio_df.empty:
         # 전체 포트폴리오 대비 개별 자산 비중 계산
         treemap_data['portfolio_percent'] = (treemap_data['value_converted'] / total_portfolio_value * 100).round(1)
         
+        # 퍼센트 정보를 display_label에 직접 포함
+        treemap_data['display_label_with_percent'] = treemap_data.apply(
+            lambda row: f"{row['display_label']}\n{row['portfolio_percent']:.1f}%", axis=1
+        )
+        
         # Treemap에서 금액 표시도 마스킹 적용
         if mask_amounts:
-            texttemplate = "<b>%{label}</b><br>***,***<br>%{text:.1f}%"
+            texttemplate = "<b>%{label}</b><br>***,***"
         else:
-            texttemplate = "<b>%{label}</b><br>%{value:,.0f}<br>%{text:.1f}%"
-        
+            texttemplate = "<b>%{label}</b><br>%{value:,.0f}"
+
         fig_treemap = px.treemap(
             treemap_data,
-            path=treemap_path,
+            path=[px.Constant("Portfolio"), 'group_with_percent', 'display_label_with_percent'],
             values='value_converted',
             color='color_value',
             color_continuous_scale='RdYlGn',
@@ -473,10 +493,9 @@ if not portfolio_df.empty:
         )
         
         fig_treemap.update_traces(
-            textinfo="label+value+text",
+            textinfo="label+value",
             texttemplate=texttemplate,
-            text=treemap_data['portfolio_percent'],
-            textfont_size=12,  # 고정 폰트 크기로 복원
+            textfont_size=12,
             textposition="middle center"
         )
         
@@ -497,25 +516,6 @@ if not portfolio_df.empty:
                   "초록색은 수익, 빨간색은 손실, 회색은 현금(수익률 0%)을 의미합니다.")
     else:
         st.info("Treemap을 표시할 자산이 없습니다.")
-    
-    st.divider()
-    
-    # 기존 차트들
-    st.write("##### 📈 자산 분석 차트")
-    viz_cols = st.columns(2)
-    
-    with viz_cols[0]:
-        st.write("###### 자산 유형별 비중")
-        asset_summary = portfolio_df.groupby('asset_type')['value_converted'].sum().reset_index()
-        fig_pie_asset = px.pie(asset_summary, names='asset_type', values='value_converted', hole=0.3)
-        fig_pie_asset.update_traces(textposition='inside', textinfo='percent+label')
-        st.plotly_chart(fig_pie_asset, use_container_width=True)
-    
-    with viz_cols[1]:
-        st.write("###### 계좌별 비중")
-        fig_pie_account = px.pie(account_summary, names='account_name', values='value_converted', hole=0.3)
-        fig_pie_account.update_traces(textposition='inside', textinfo='percent+label')
-        st.plotly_chart(fig_pie_account, use_container_width=True)
     
     st.divider()
     
